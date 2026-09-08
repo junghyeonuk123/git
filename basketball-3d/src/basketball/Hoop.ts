@@ -19,6 +19,8 @@ import { Net } from './Net';
  */
 export class Hoop {
   readonly rimCenter: THREE.Vector3;
+  /** Point on the backboard face above the rim - the classic bank-shot aim point. */
+  readonly bankSpot: THREE.Vector3;
   readonly backboard: Backboard;
   readonly net: Net;
 
@@ -29,6 +31,7 @@ export class Hoop {
     const backboardX = side * (CD.length / 2 - backboardDistanceFromBaseline);
     const rimX = backboardX - side * rimDistanceFromBackboard;
     this.rimCenter = new THREE.Vector3(rimX, rimHeight, 0);
+    this.bankSpot = new THREE.Vector3(backboardX, rimHeight + 0.18, 0);
 
     // --- rim: torus baked with a vertical axis so mesh & trimesh collider match exactly
     const torusGeometry = new THREE.TorusGeometry(rimRadius, rimTubeRadius, 12, 48);
