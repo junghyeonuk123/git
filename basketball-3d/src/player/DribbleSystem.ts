@@ -3,8 +3,8 @@ import type { Player } from './Player';
 import type { Ball } from '@/basketball/Ball';
 
 const DRIBBLE_HAND_HEIGHT = 0.78; // waist-ish, real dribble height
-const HORIZONTAL_SPRING = 10; // how hard the ball is steered back under the hand
-const MAX_HORIZONTAL_CORRECTION = 3.5; // m/s cap so a sudden direction change doesn't teleport the ball
+const HORIZONTAL_SPRING = 18; // how hard the ball is steered back under the hand
+const MAX_HORIZONTAL_CORRECTION = 8; // m/s cap - must exceed sprint speed or the ball visibly lags behind
 const PUSH_SPEED = 4.4; // m/s downward impulse of each dribble "push"
 const PUSH_COOLDOWN = 0.12; // seconds, debounces re-triggering while hovering near the push height
 

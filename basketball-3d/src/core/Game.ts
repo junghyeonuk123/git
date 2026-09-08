@@ -122,7 +122,10 @@ export class Game {
   }
 
   private readonly fixedUpdate = (dt: number): void => {
-    this.playerController.fixedUpdate(this.cameraController.yaw, dt, this.hoops);
+    // Movement is world-relative, not camera-relative - the broadcast
+    // camera (CameraController) never rotates, so there is no camera yaw
+    // to convert input against.
+    this.playerController.fixedUpdate(dt, this.hoops);
     this.physics.step();
     this.updateNets(dt);
     this.updateLooseBallRecovery(dt);
@@ -174,7 +177,13 @@ export class Game {
     this.player.syncFromPhysics();
     this.player.updateWalkCycle(this.playerController.movement.speed, dt);
     this.ball.syncFromPhysics();
-    this.cameraController.update(this.player.position, this.playerController.movement.facingYaw, dt);
+    if (this.playerController.hasBall) {
+      // visually plants the dribbling hand on the ball instead of letting
+      // it read as a separate object bouncing near the player (spec
+      // section 26: ball/hand IK)
+      this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
+    }
+    this.cameraController.update(this.player.position, this.ball.position, dt);
 
     if (this.debugEnabled) {
       this.renderDebugPanel(dt);

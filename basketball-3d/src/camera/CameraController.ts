@@ -1,38 +1,44 @@
 import * as THREE from 'three';
-import { damp } from '@/utils/MathUtils';
+import { damp, clamp } from '@/utils/MathUtils';
 
 export interface CameraControllerConfig {
-  distance: number;
+  sidelineDistance: number; // fixed distance from the court's centerline (Z=0)
   height: number;
   lookAtHeight: number;
-  positionLambda: number; // higher = snappier follow
-  rotationLambda: number;
+  panRange: number; // how far along the court's length the camera is allowed to pan
+  panLambda: number; // higher = snappier pan tracking
+  lookLambda: number;
+  ballInfluence: number; // 0..1, how much the ball (vs. the player alone) pulls the framing
   fov: number;
 }
 
 export const DEFAULT_CAMERA_CONFIG: CameraControllerConfig = {
-  distance: 6.5,
-  height: 3.2,
+  sidelineDistance: 17,
+  height: 8,
   lookAtHeight: 1.3,
-  positionLambda: 6,
-  rotationLambda: 8,
-  fov: 55,
+  panRange: 13,
+  panLambda: 2.2,
+  lookLambda: 3.5,
+  ballInfluence: 0.3,
+  fov: 42,
 };
 
 /**
- * Phase 1 gameplay camera: smoothly damped third-person follow, orbiting
- * behind the player's facing direction. This is intentionally the only
- * camera mode for now - BroadcastCamera/ReplayCamera/CinematicCamera
- * (spec sections 20-22) come later behind the same CameraManager
- * interface once there is an event bus and multiple modes worth
- * switching between.
+ * A fixed broadcast-style sideline camera (spec section 21): it never
+ * orbits or rotates to match a player's facing direction - it sits at a
+ * constant position off one sideline, the way a real TV camera is bolted
+ * in place, and only pans/tilts to keep the play framed. This is the
+ * direct fix for the disorienting spin a facing-locked orbit camera
+ * produced whenever the player turned. Movement input is correspondingly
+ * world-relative now (see PlayerController), not camera-relative, since
+ * there is no longer a rotating camera yaw to be relative to.
  */
 export class CameraController {
   readonly camera: THREE.PerspectiveCamera;
-  yaw = 0;
 
-  private readonly currentPosition = new THREE.Vector3();
-  private readonly currentTarget = new THREE.Vector3();
+  private currentX = 0;
+  private lookX = 0;
+  private lookZ = 0;
   private initialized = false;
 
   constructor(
@@ -47,32 +53,24 @@ export class CameraController {
     this.camera.updateProjectionMatrix();
   }
 
-  /** Call once per rendered frame (not per fixed step) with the player's current facing/position. */
-  update(playerPosition: THREE.Vector3, playerFacingYaw: number, dt: number): void {
-    // orbit the camera to sit behind the player's facing direction
-    this.yaw = playerFacingYaw;
-
-    const desired = new THREE.Vector3(
-      playerPosition.x - Math.sin(this.yaw) * this.config.distance,
-      playerPosition.y + this.config.height,
-      playerPosition.z - Math.cos(this.yaw) * this.config.distance,
-    );
-    const target = new THREE.Vector3(playerPosition.x, playerPosition.y + this.config.lookAtHeight, playerPosition.z);
+  /** Call once per rendered frame with the play's current focal points. */
+  update(playerPosition: THREE.Vector3, ballPosition: THREE.Vector3, dt: number): void {
+    const focusX = THREE.MathUtils.lerp(playerPosition.x, ballPosition.x, this.config.ballInfluence);
+    const focusZ = THREE.MathUtils.lerp(playerPosition.z, ballPosition.z, this.config.ballInfluence);
+    const targetX = clamp(focusX, -this.config.panRange, this.config.panRange);
 
     if (!this.initialized) {
-      this.currentPosition.copy(desired);
-      this.currentTarget.copy(target);
+      this.currentX = targetX;
+      this.lookX = focusX;
+      this.lookZ = focusZ;
       this.initialized = true;
     } else {
-      this.currentPosition.x = damp(this.currentPosition.x, desired.x, this.config.positionLambda, dt);
-      this.currentPosition.y = damp(this.currentPosition.y, desired.y, this.config.positionLambda, dt);
-      this.currentPosition.z = damp(this.currentPosition.z, desired.z, this.config.positionLambda, dt);
-      this.currentTarget.x = damp(this.currentTarget.x, target.x, this.config.rotationLambda, dt);
-      this.currentTarget.y = damp(this.currentTarget.y, target.y, this.config.rotationLambda, dt);
-      this.currentTarget.z = damp(this.currentTarget.z, target.z, this.config.rotationLambda, dt);
+      this.currentX = damp(this.currentX, targetX, this.config.panLambda, dt);
+      this.lookX = damp(this.lookX, focusX, this.config.lookLambda, dt);
+      this.lookZ = damp(this.lookZ, focusZ, this.config.lookLambda, dt);
     }
 
-    this.camera.position.copy(this.currentPosition);
-    this.camera.lookAt(this.currentTarget);
+    this.camera.position.set(this.currentX * 0.6, this.config.height, -this.config.sidelineDistance);
+    this.camera.lookAt(this.lookX, this.config.lookAtHeight, this.lookZ);
   }
 }

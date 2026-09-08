@@ -8,6 +8,8 @@ import { clamp } from '@/utils/MathUtils';
 
 const GRAVITY = -9.81;
 const GROUNDED_STICK_VELOCITY = -0.6;
+const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
 
 interface PlayerRig {
   root: THREE.Group;
@@ -200,6 +202,28 @@ export class Player {
     this.rig.torsoPivot.position.y = (SHOULDER_HEIGHT + HIP_HEIGHT) / 2 + idleSway;
     // called after syncFromPhysics each frame, so this offsets that frame's ground-truth foot height
     this.visualRoot.position.y += bob;
+  }
+
+  /**
+   * Procedural shoulder IK (spec section 26): while dribbling, the ball
+   * must read as being in the player's hand, not floating near it. This
+   * rotates the dribbling-side arm pivot so the arm points at the ball's
+   * actual physics position every frame, overriding whatever the walk
+   * cycle set that arm to this frame. Call after updateWalkCycle.
+   */
+  pointArmAtBall(hand: 1 | -1, ballWorldPos: THREE.Vector3): void {
+    const pivot = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
+    const yaw = this.facingYaw;
+
+    const localPivotPos = pivot.position.clone().applyAxisAngle(UP, yaw);
+    const worldShoulder = this.visualRoot.position.clone().add(localPivotPos);
+
+    const dirWorld = ballWorldPos.clone().sub(worldShoulder);
+    if (dirWorld.lengthSq() < 1e-6) return;
+    dirWorld.normalize();
+
+    const dirLocal = dirWorld.applyAxisAngle(UP, -yaw);
+    pivot.quaternion.setFromUnitVectors(DOWN, dirLocal);
   }
 
   /** Copy the physics transform onto the render group. Call after each physics step. */
