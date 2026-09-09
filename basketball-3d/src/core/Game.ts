@@ -6,9 +6,13 @@ import { Court } from '@/basketball/Court';
 import { Hoop } from '@/basketball/Hoop';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
+import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
+import type { ShotResult } from '@/player/ShootingSystem';
 import { CameraController } from '@/camera/CameraController';
+import { Scoreboard } from '@/ui/Scoreboard';
+import { GameClock } from '@/ui/GameClock';
 
 export interface LoadProgressCallback {
   (fraction: number, statusText: string): void;
@@ -32,6 +36,11 @@ export class Game {
   private ball!: Ball;
   private hoops: Hoop[] = [];
   private loop!: GameLoop;
+
+  private readonly rules = new BasketballRules();
+  private readonly scoreboard = new Scoreboard();
+  private readonly gameClock = new GameClock();
+  private lastSeenShotResult: ShotResult | null = null;
 
   private looseBallTimer = 0;
   private readonly GRAVITY_MAGNITUDE = 9.81;
@@ -128,6 +137,13 @@ export class Game {
     this.playerController.fixedUpdate(dt, this.hoops);
     this.physics.step();
     this.updateNets(dt);
+
+    if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
+      this.lastSeenShotResult = this.playerController.lastShotResult;
+      this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
+    }
+    this.rules.update(dt, this.ball.position, this.playerController.hasBall);
+
     this.updateLooseBallRecovery(dt);
   };
 
@@ -147,16 +163,23 @@ export class Game {
     }
   }
 
-  /** No defenders/AI exist yet (Phase 5), so a shot or pass that comes to rest is simply handed back. */
+  /**
+   * No defenders/AI exist yet (Phase 5) and there's no second team to
+   * award a turnover to, so a made basket, a violation, or a loose ball
+   * that comes to rest all resolve the same way in this practice-mode
+   * loop: hand the ball back to the player.
+   */
   private updateLooseBallRecovery(dt: number): void {
-    // Safety net: an overpowered shot can clear the finite floor collider
-    // entirely and free-fall forever with nothing to bounce off of -
-    // that's a real (if extreme) physics outcome, not a bug, but without
-    // an out-of-bounds rule yet (Phase 3) the ball needs a way back.
-    if (this.ball.position.y < -3 || Math.hypot(this.ball.position.x, this.ball.position.z) > CD.length) {
-      this.playerController.regainPossession();
-      this.playerController.placeBallInHand();
-      this.looseBallTimer = 0;
+    // Hard safety net unrelated to game rules: an overpowered shot could
+    // in principle clear the finite floor collider entirely and free-fall
+    // forever with nothing left to bounce off of.
+    if (this.ball.position.y < -3) {
+      this.recoverBall();
+      return;
+    }
+
+    if (this.rules.turnoverRequested) {
+      this.recoverBall();
       return;
     }
 
@@ -167,10 +190,14 @@ export class Game {
     const speed = this.ball.linearVelocity.length();
     this.looseBallTimer = speed < 0.4 ? this.looseBallTimer + dt : 0;
     if (this.looseBallTimer > 1.2) {
-      this.playerController.regainPossession();
-      this.playerController.placeBallInHand();
-      this.looseBallTimer = 0;
+      this.recoverBall();
     }
+  }
+
+  private recoverBall(): void {
+    this.playerController.regainPossession();
+    this.playerController.placeBallInHand();
+    this.looseBallTimer = 0;
   }
 
   private readonly update = (dt: number, _alpha: number): void => {
@@ -184,6 +211,9 @@ export class Game {
       this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
     }
     this.cameraController.update(this.player.position, this.ball.position, dt);
+
+    this.scoreboard.update(this.rules, dt);
+    this.gameClock.update(this.rules);
 
     if (this.debugEnabled) {
       this.renderDebugPanel(dt);
@@ -199,17 +229,22 @@ export class Game {
   private renderDebugPanel(dt: number): void {
     const fps = dt > 0 ? 1 / dt : 0;
     const v = this.ball.linearVelocity;
+    const bp = this.ball.position;
     const p = this.player.position;
     this.debugPanel.textContent = [
       `fps: ${fps.toFixed(0)}`,
       `physicsDt: ${this.physics.world.timestep.toFixed(4)}`,
       `playerPos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`,
       `grounded: ${this.player.isGrounded}`,
+      `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
       `ballVel: ${v.length().toFixed(2)}`,
       `hasBall: ${this.playerController.hasBall}`,
       `shotState: ${this.playerController.shooting.state}`,
       `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
       `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}`,
+      `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
+      `shotClock: ${this.rules.shotClock.toFixed(1)}`,
+      `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,
       `bodies: ${this.physics.world.bodies.len()}`,
       `colliders: ${this.physics.world.colliders.len()}`,
     ].join('\n');

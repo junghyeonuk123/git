@@ -3,6 +3,7 @@ import type { Player } from './Player';
 import type { Ball } from '@/basketball/Ball';
 import type { Hoop } from '@/basketball/Hoop';
 import { solveLaunch, shotAngleForDistance } from '@/utils/Ballistics';
+import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 
 const GATHER_HEIGHT = 1.3; // chest/set-point height for the ball while charging
 const FILL_RATE = 1.0; // meter units per second
@@ -19,6 +20,19 @@ export interface ShotResult {
   angularVelocity: THREE.Vector3;
   zone: ShotZone;
   targetHoop: Hoop;
+  points: 2 | 3;
+}
+
+/**
+ * Point value is judged from the shooter's foot position at release
+ * (spec section 8), not where the ball ends up. This ignores the
+ * corner-vs-arc distinction in the real three-point line's geometry
+ * (spec section 25's real dimensions do carry both) and uses one arc
+ * distance uniformly - a deliberate simplification, not an oversight.
+ */
+function pointsForRelease(releasePos: THREE.Vector3, hoop: Hoop): 2 | 3 {
+  const dist = Math.hypot(releasePos.x - hoop.rimCenter.x, releasePos.z - hoop.rimCenter.z);
+  return dist >= CD.threePoint.arcDistance ? 3 : 2;
 }
 
 function classifyMeter(meter: number): ShotZone {
@@ -81,7 +95,7 @@ export class ShootingSystem {
 
     let solution =
       zone === 'bank'
-        ? solveLaunch(releasePos, targetHoop.bankSpot, shotAngleForDistance(dxRim * 0.9), this.physicsGravity, this.physicsDt)
+        ? solveLaunch(releasePos, targetHoop.bankSpot, shotAngleForDistance(dxRim), this.physicsGravity, this.physicsDt)
         : solveLaunch(releasePos, targetHoop.rimCenter, rimAngle, this.physicsGravity, this.physicsDt);
 
     if (!solution) {
@@ -101,7 +115,8 @@ export class ShootingSystem {
     const angularVelocity = horizAxis.multiplyScalar(BACKSPIN);
 
     this.ball.release(velocity, angularVelocity);
-    return { velocity, angularVelocity, zone, targetHoop };
+    const points = pointsForRelease(releasePos, targetHoop);
+    return { velocity, angularVelocity, zone, targetHoop, points };
   }
 }
 

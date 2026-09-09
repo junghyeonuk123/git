@@ -15,6 +15,16 @@ export const PhysicsMaterials = {
   player: { restitution: 0.05, friction: 0.4 } satisfies PhysicsMaterial,
 } as const;
 
+/**
+ * Ball's rigid-body linear damping. Pulled out as its own constant
+ * (rather than a literal on the RigidBodyDesc in Ball.ts) because
+ * Ballistics.ts's flight simulation needs the exact same value to
+ * predict where a shot actually lands - the ball decelerates slightly
+ * throughout its arc, and any targeting solve that ignores that drifts
+ * short of the target.
+ */
+export const BALL_LINEAR_DAMPING = 0.05;
+
 export const NetMaterial = {
   /** Verlet/PBD point damping (0..1 per step, higher = settles faster). */
   damping: 0.985,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BALL_LINEAR_DAMPING } from '@/physics/MaterialProperties';
 
 /**
  * Projectile targeting used by shooting/passing: given a release point,
@@ -9,9 +10,20 @@ import * as THREE from 'three';
  * loop below exists because a discretely-stepped simulation drifts
  * slightly from that continuous solution, and the rim opening is narrow
  * enough (spec section 6) for that drift to matter.
+ *
+ * It also has to match the ball's actual rigid-body linear damping
+ * (BALL_LINEAR_DAMPING) - a shot solved against pure gravity alone
+ * lands consistently short, because the real ball bleeds a little
+ * velocity every step the same way Rapier's own integrator does.
  */
 
 const MAX_SIM_STEPS = 240;
+
+/** Same per-step velocity decay Rapier applies for a body's linear_damping. */
+function applyDamping(vHoriz: number, vY: number, dt: number): [number, number] {
+  const factor = 1 / (1 + dt * BALL_LINEAR_DAMPING);
+  return [vHoriz * factor, vY * factor];
+}
 
 function closedFormSpeed(dx: number, dy: number, angle: number, gravity: number): number | null {
   const cos = Math.cos(angle);
@@ -32,6 +44,7 @@ function simulateHorizontalDistanceAtHeight(speed: number, angle: number, target
   for (let i = 0; i < MAX_SIM_STEPS; i++) {
     prevY = y;
     vY -= gravity * dt;
+    [vHoriz, vY] = applyDamping(vHoriz, vY, dt);
     horiz += vHoriz * dt;
     y += vY * dt;
     if (prevY > targetY && y <= targetY) {

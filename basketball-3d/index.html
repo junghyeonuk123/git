@@ -3,19 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Basketball 3D — Phase 1</title>
+    <title>Basketball 3D</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="app">
       <canvas id="scene"></canvas>
+
+      <div id="scoreboard">
+        <div id="score-value">0</div>
+        <div id="scoreboard-clock">
+          <div id="quarter-value">Q1</div>
+          <div id="game-clock-value">12:00</div>
+        </div>
+        <div id="shot-clock-value">24</div>
+      </div>
+      <div id="event-banner"></div>
+
       <div id="loading-screen">
         <div class="loading-title">BASKETBALL 3D</div>
         <div class="loading-bar"><div id="loading-bar-fill"></div></div>
         <div id="loading-status">Loading…</div>
       </div>
       <div id="debug-panel" hidden></div>
-      <div id="hint">WASD move &middot; Shift sprint &middot; F1 debug</div>
+      <div id="hint">WASD move &middot; Shift sprint &middot; F shoot &middot; E pass &middot; F1 debug</div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

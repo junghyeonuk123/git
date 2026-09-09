@@ -63,7 +63,7 @@ export class Hoop {
 
     // --- support structure (cosmetic only for now)
     const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.5, metalness: 0.6 });
-    const poleX = backboardX - side * poleSetback;
+    const poleX = backboardX + side * poleSetback; // further from center court than the backboard, i.e. behind it
     const poleHeight = rimHeight + 0.9;
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, poleHeight, 12), poleMaterial);
     pole.position.set(poleX, poleHeight / 2, 0);

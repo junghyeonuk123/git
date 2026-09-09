@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '@/physics/PhysicsWorld';
-import { PhysicsMaterials } from '@/physics/MaterialProperties';
+import { PhysicsMaterials, BALL_LINEAR_DAMPING } from '@/physics/MaterialProperties';
 import { CollisionGroup, interactionGroups } from '@/physics/CollisionLayers';
 import { CourtDimensions as CD } from './CourtDimensions';
 
@@ -47,7 +47,7 @@ export class Ball {
 
     const bodyDesc = physics.RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(spawn.x, spawn.y, spawn.z)
-      .setLinearDamping(0.05)
+      .setLinearDamping(BALL_LINEAR_DAMPING)
       .setAngularDamping(0.2)
       .setCcdEnabled(true); // fast shots must not tunnel through the rim/backboard
     this.body = physics.world.createRigidBody(bodyDesc);
