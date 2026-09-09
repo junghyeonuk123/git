@@ -123,7 +123,7 @@ export class ShootingSystem {
   }
 }
 
-function nearestHoop(hoops: readonly Hoop[], from: THREE.Vector3): Hoop {
+export function nearestHoop(hoops: readonly Hoop[], from: THREE.Vector3): Hoop {
   let best = hoops[0]!;
   let bestDist = Infinity;
   for (const hoop of hoops) {

@@ -9,7 +9,7 @@ import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
-import type { ShotResult } from '@/player/ShootingSystem';
+import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { CameraController } from '@/camera/CameraController';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { GameClock } from '@/ui/GameClock';
@@ -272,7 +272,12 @@ export class Game {
       // section 26: ball/hand IK)
       this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
     }
-    this.cameraController.update(this.player.position, this.ball.position, dt);
+    const charging = this.playerController.shooting.state === 'charging';
+    this.cameraController.update(this.player.position, this.ball.position, dt, {
+      speed: this.playerController.movement.speed,
+      charging,
+      chargeFocusX: charging ? nearestHoop(this.hoops, this.ball.position).rimCenter.x : null,
+    });
 
     this.scoreboard.update(this.rules, dt);
     this.gameClock.update(this.rules);
