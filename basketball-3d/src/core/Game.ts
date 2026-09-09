@@ -4,6 +4,7 @@ import { InputManager } from './InputManager';
 import { PhysicsWorld } from '@/physics/PhysicsWorld';
 import { Court } from '@/basketball/Court';
 import { Hoop } from '@/basketball/Hoop';
+import { Arena } from '@/environment/Arena';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
@@ -101,6 +102,9 @@ export class Game {
     onProgress(0.45, 'Building court…');
     new Court(this.scene, this.physics);
     this.hoops = [new Hoop(this.scene, this.physics, 1), new Hoop(this.scene, this.physics, -1)];
+
+    onProgress(0.6, 'Building arena…');
+    new Arena(this.scene);
 
     onProgress(0.7, 'Spawning players…');
     this.cameraController = new CameraController(window.innerWidth / window.innerHeight);
