@@ -84,6 +84,11 @@ export class Ball {
     return new THREE.Vector3(v.x, v.y, v.z);
   }
 
+  /** True while held via setKinematicHeld (gather/charge pose) - used by BallOwnership.ts to catch the two ever going out of sync. */
+  get isKinematic(): boolean {
+    return this.body.isKinematic();
+  }
+
   setKinematicHeld(position: THREE.Vector3): void {
     this.body.setBodyType(2 /* kinematicPositionBased */, true);
     this.body.setNextKinematicTranslation(position);

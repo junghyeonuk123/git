@@ -64,22 +64,19 @@ export type PlayerState =
   | 'stunned';
 
 /**
- * Who/what currently owns the basketball's position (spec section 3/67).
- * Deliberately doesn't encode which hand - that's PlayerController.hand,
- * an orthogonal concern - just which system is authoritative:
- * DribbleSystem/ShootingSystem's gather pose/PassingSystem/physics.
+ * Whether PlayerMovement's live input should drive the player while in a
+ * given state. (Ball ownership used to live here too, as a parallel,
+ * looser categorization - moved to BallOwnershipTracker in
+ * BallOwnership.ts, phase 2, so there's exactly one authoritative record
+ * of who holds the ball instead of two that could drift apart.)
  */
-export type BallOwnership = 'free' | 'controlled' | 'gather' | 'shot' | 'pass' | 'dunk' | 'rebound';
-
-/** Whether PlayerMovement's live input should drive the player while in a given state. */
 export type LocomotionMode = 'free' | 'reduced' | 'locked';
 
 export interface StateMeta {
-  ballOwnership: BallOwnership;
   locomotion: LocomotionMode;
 }
 
-const DEFAULT_META: StateMeta = { ballOwnership: 'free', locomotion: 'free' };
+const DEFAULT_META: StateMeta = { locomotion: 'free' };
 
 /**
  * Metadata for the states actually reachable today. Deliberately not
@@ -95,21 +92,14 @@ const DEFAULT_META: StateMeta = { ballOwnership: 'free', locomotion: 'free' };
  * real to read starting now instead of retrofitting it later.
  */
 const STATE_META: Partial<Record<PlayerState, StateMeta>> = {
-  idle: DEFAULT_META,
-  walk: DEFAULT_META,
-  run: DEFAULT_META,
-  sprint: DEFAULT_META,
-  tripleThreat: { ballOwnership: 'controlled', locomotion: 'free' },
-  dribbling: { ballOwnership: 'controlled', locomotion: 'free' },
-  crossover: { ballOwnership: 'controlled', locomotion: 'reduced' },
-  legsThrough: { ballOwnership: 'controlled', locomotion: 'reduced' },
-  hesitation: { ballOwnership: 'controlled', locomotion: 'reduced' },
-  inAndOut: { ballOwnership: 'controlled', locomotion: 'reduced' },
-  stepback: { ballOwnership: 'controlled', locomotion: 'reduced' },
-  gather: { ballOwnership: 'gather', locomotion: 'locked' },
-  shooting: { ballOwnership: 'gather', locomotion: 'locked' },
-  release: { ballOwnership: 'shot', locomotion: 'locked' },
-  pass: { ballOwnership: 'pass', locomotion: 'free' },
+  crossover: { locomotion: 'reduced' },
+  legsThrough: { locomotion: 'reduced' },
+  hesitation: { locomotion: 'reduced' },
+  inAndOut: { locomotion: 'reduced' },
+  stepback: { locomotion: 'reduced' },
+  gather: { locomotion: 'locked' },
+  shooting: { locomotion: 'locked' },
+  release: { locomotion: 'locked' },
 };
 
 export class PlayerStateMachine {

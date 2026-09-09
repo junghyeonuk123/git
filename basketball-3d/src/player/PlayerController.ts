@@ -9,6 +9,7 @@ import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
 import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
+import { BallOwnershipTracker } from '@/basketball/BallOwnership';
 
 const MOVE_ACTIONS: DribbleMoveType[] = ['crossover', 'hesitation', 'stepback', 'inAndOut', 'legsThrough'];
 
@@ -28,6 +29,8 @@ export class PlayerController {
   readonly passing: PassingSystem;
   /** Phase 1 of the gameplay-systems spec: a single authoritative label for what the player is doing (see PlayerStateMachine.ts). */
   readonly stateMachine = new PlayerStateMachine();
+  /** Phase 2: single authoritative record of which system currently owns the ball's position (see BallOwnership.ts). */
+  readonly ballOwnership = new BallOwnershipTracker();
 
   hasBall = true;
   /** Which hand is dribbling - mutable now, since crossover/inAndOut/legsThrough switch it mid-dribble. */
@@ -91,10 +94,12 @@ export class PlayerController {
           this.hasBall = false;
           this.dribbleSprintActive = false;
           this.stateMachine.enter('release');
+          this.ballOwnership.claim('shot', 'shooting');
           return;
         }
       }
       this.stateMachine.enter('gather');
+      this.ballOwnership.claim('gather', 'shooting');
       return;
     }
 
@@ -103,12 +108,14 @@ export class PlayerController {
       this.hasBall = false;
       this.dribbleSprintActive = false;
       this.stateMachine.enter('pass');
+      this.ballOwnership.claim('pass', 'passing');
       return;
     }
 
     if (!this.hasBall) {
       this.dribbleSprintActive = false;
       this.stateMachine.enter(this.computeLocomotionState(sprint));
+      this.ballOwnership.claim('free', 'none');
       return;
     }
 
@@ -124,6 +131,7 @@ export class PlayerController {
     } else {
       this.stateMachine.enter('dribbling');
     }
+    this.ballOwnership.claim(this.hand === 1 ? 'controlledRight' : 'controlledLeft', 'dribble');
   }
 
   /**
