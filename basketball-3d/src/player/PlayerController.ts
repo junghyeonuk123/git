@@ -144,7 +144,7 @@ export class PlayerController {
       : isStationary
         ? DRIBBLE_HEIGHT_HIGH
         : DRIBBLE_HEIGHT_NORMAL;
-    this.dribble.fixedUpdate(dt, this.hand, dribbleHeight);
+    this.dribble.fixedUpdate(dt, this.hand, dribbleHeight, this.movement.velocity);
 
     const activeMove = this.moves.activeType;
     if (activeMove !== null) {
