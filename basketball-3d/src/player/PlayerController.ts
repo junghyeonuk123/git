@@ -53,7 +53,16 @@ export class PlayerController {
    */
   fixedUpdate(dt: number, hoops: readonly Hoop[]): void {
     const sprint = this.input.isDown('sprint');
-    const displacement = this.movement.step(this.input.moveAxis, sprint, dt);
+    // Real gather rule: once the shot motion starts, you don't get to keep
+    // cutting new directions with the stick - whatever momentum you already
+    // had just carries you a step or two and decelerates to a stop (via
+    // PlayerMovement's normal no-input deceleration curve), same as the
+    // one or two steps a real gather allows before you have to release.
+    // Feeding it live input here was letting the player sprint freely for
+    // the whole hold, which read as a canned "gather" that never actually
+    // stopped moving - as if the two systems were fighting each other.
+    const moveAxis = this.shooting.state === 'charging' ? { x: 0, y: 0 } : this.input.moveAxis;
+    const displacement = this.movement.step(moveAxis, sprint, dt);
     this.player.applyMovement(displacement, dt);
 
     if (this.movement.speed > 0.05) {
@@ -69,6 +78,7 @@ export class PlayerController {
     }
 
     if (this.shooting.state === 'charging') {
+      this.dribbleSprintActive = false;
       this.shooting.fixedUpdate(dt, this.hand);
       if (this.input.wasReleasedThisFrame('shoot')) {
         const result = this.shooting.release(hoops);
