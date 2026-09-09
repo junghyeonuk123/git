@@ -8,11 +8,76 @@ const FLOOR_THICKNESS = 0.2;
 /** Texels per meter for the painted-line canvas texture. */
 const TEXTURE_DENSITY = 64;
 
+function woodColor(lightnessJitter: number): string {
+  return `hsl(29, 47%, ${(46 + lightnessJitter).toFixed(1)}%)`;
+}
+
 /**
- * Procedurally draws the court's painted lines onto a canvas texture.
- * Keeps line rendering crisp without hundreds of THREE.Line segments, and
- * gives Phase B (visual upgrade) a single place to swap in a wood-grain
- * base layer underneath the same line pass.
+ * Paints strip hardwood the way a real NBA floor is actually laid - long
+ * boards running the length of the court, each strip a slightly different
+ * shade with wavy grain and sparse randomized end-seams - instead of one
+ * flat fill color. This runs once at load (into a canvas the size of the
+ * whole court), never per frame, so the per-band randomness and per-seam
+ * stroke() calls cost nothing at runtime.
+ */
+function drawHardwood(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const base = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.65);
+  base.addColorStop(0, 'hsl(30, 49%, 50%)');
+  base.addColorStop(1, 'hsl(28, 44%, 38%)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, w, h);
+
+  const bandPx = 0.55 * TEXTURE_DENSITY;
+  const bandCount = Math.ceil(h / bandPx);
+
+  for (let i = 0; i < bandCount; i++) {
+    const y = i * bandPx;
+    const bandH = Math.min(bandPx, h - y);
+
+    ctx.fillStyle = woodColor((Math.random() - 0.5) * 10);
+    ctx.fillRect(0, y, w, bandH);
+
+    // wavy grain streaks, a couple per board strip
+    ctx.globalAlpha = 0.05;
+    ctx.lineWidth = 1;
+    for (let g = 0; g < 3; g++) {
+      const gy = y + Math.random() * bandH;
+      ctx.strokeStyle = Math.random() > 0.5 ? '#2c1a0c' : '#f2dfc0';
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      const segments = 10;
+      for (let s = 1; s <= segments; s++) {
+        ctx.lineTo((w / segments) * s, gy + (Math.random() - 0.5) * bandH * 0.3);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // individual board end-seams at randomized spacing
+    const seamPx = (2.2 + Math.random() * 0.8) * TEXTURE_DENSITY;
+    ctx.strokeStyle = 'rgba(30, 18, 8, 0.35)';
+    ctx.lineWidth = 1.5;
+    for (let x = Math.random() * seamPx; x < w; x += seamPx) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + bandH);
+      ctx.stroke();
+    }
+
+    // faint seam between adjacent strips
+    ctx.strokeStyle = 'rgba(20, 12, 5, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+}
+
+/**
+ * Procedurally draws the court's hardwood + painted lines onto a canvas
+ * texture. Keeps line rendering crisp without hundreds of THREE.Line
+ * segments.
  */
 function buildCourtTexture(): THREE.CanvasTexture {
   const w = Math.round((CD.length + CD.apron * 2) * TEXTURE_DENSITY);
@@ -28,20 +93,7 @@ function buildCourtTexture(): THREE.CanvasTexture {
     (z + CD.width / 2 + CD.apron) * TEXTURE_DENSITY,
   ];
 
-  // wood base with subtle plank striping
-  ctx.fillStyle = '#b5793f';
-  ctx.fillRect(0, 0, w, h);
-  ctx.globalAlpha = 0.06;
-  ctx.strokeStyle = '#3a2410';
-  ctx.lineWidth = 2;
-  const plankWidth = 0.18 * TEXTURE_DENSITY;
-  for (let x = 0; x < w; x += plankWidth) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
+  drawHardwood(ctx, w, h);
 
   const lineWidth = Math.max(2, 0.05 * TEXTURE_DENSITY);
   ctx.strokeStyle = '#f4f0e6';
@@ -99,7 +151,7 @@ function buildCourtTexture(): THREE.CanvasTexture {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
+  texture.anisotropy = 8;
   return texture;
 }
 
@@ -109,10 +161,17 @@ export class Court {
   constructor(scene: THREE.Scene, physics: PhysicsWorld) {
     const texture = buildCourtTexture();
     const geometry = new THREE.PlaneGeometry(CD.length + CD.apron * 2, CD.width + CD.apron * 2);
-    const material = new THREE.MeshStandardMaterial({
+    // MeshPhysicalMaterial's clearcoat gives the thin glossy lacquer layer
+    // a real polished hardwood floor has - a soft, direct-light specular
+    // sheen rather than a flat matte fill - without needing an environment
+    // map (spec section 21: cheapest method that still reads as reflective,
+    // not a flat game-prototype floor).
+    const material = new THREE.MeshPhysicalMaterial({
       map: texture,
-      roughness: 0.65,
+      roughness: 0.55,
       metalness: 0.0,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.25,
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.rotation.x = -Math.PI / 2;
