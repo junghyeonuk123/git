@@ -44,7 +44,6 @@ interface PendingShot {
   prevBallX: number;
   prevBallY: number;
   prevBallZ: number;
-  scored: boolean;
 }
 
 export class BasketballRules {
@@ -58,6 +57,8 @@ export class BasketballRules {
 
   private paintClock = 0;
   private pendingShot: PendingShot | null = null;
+  /** Rule 4-Section III-1-a-i: a field goal already in flight when the clock hits :00.0 still gets to finish. */
+  private periodEndPending = false;
   private elapsed = 0;
   /** Set for one fixedUpdate call when a violation/turnover should hand the ball back. */
   turnoverRequested = false;
@@ -70,7 +71,6 @@ export class BasketballRules {
       prevBallX: ballPosition.x,
       prevBallY: ballPosition.y,
       prevBallZ: ballPosition.z,
-      scored: false,
     };
   }
 
@@ -88,18 +88,33 @@ export class BasketballRules {
   }
 
   private updateClock(dt: number): void {
+    if (this.periodEndPending) {
+      // Holding at :00.0 until checkScoring resolves the in-flight shot
+      // (scored, or missed and back on the floor) - see its own comment.
+      if (!this.pendingShot) this.finishPeriod();
+      return;
+    }
     if (this.quarterClock <= 0) return;
     this.quarterClock = Math.max(0, this.quarterClock - dt);
     if (this.quarterClock === 0) {
-      if (this.quarter >= TOTAL_QUARTERS) {
-        this.running = false;
-        this.emit('gameEnd', `Final score: ${this.score}`);
+      if (this.pendingShot) {
+        this.periodEndPending = true;
       } else {
-        this.quarter += 1;
-        this.quarterClock = QUARTER_SECONDS;
-        this.resetShotClock();
-        this.emit('quarterEnd', `Start of Q${this.quarter}`);
+        this.finishPeriod();
       }
+    }
+  }
+
+  private finishPeriod(): void {
+    this.periodEndPending = false;
+    if (this.quarter >= TOTAL_QUARTERS) {
+      this.running = false;
+      this.emit('gameEnd', `Final score: ${this.score}`);
+    } else {
+      this.quarter += 1;
+      this.quarterClock = QUARTER_SECONDS;
+      this.resetShotClock();
+      this.emit('quarterEnd', `Start of Q${this.quarter}`);
     }
   }
 
@@ -137,7 +152,7 @@ export class BasketballRules {
 
   private checkScoring(ballPosition: THREE.Vector3): void {
     const pending = this.pendingShot;
-    if (!pending || pending.scored) return;
+    if (!pending) return;
 
     const hoop = pending.hoop;
     const crossedDown = pending.prevBallY > hoop.rimCenter.y && ballPosition.y <= hoop.rimCenter.y;
@@ -156,14 +171,25 @@ export class BasketballRules {
     const scoringRadius = CD.hoop.rimRadius - CD.ball.radius;
 
     if (crossedDown && horizDist < scoringRadius) {
-      pending.scored = true;
       this.score += pending.points;
       this.resetShotClock();
       this.emit('score', `${pending.points === 3 ? '3-POINTER' : 'Basket'}! +${pending.points}`);
+      this.pendingShot = null;
+      return;
     }
     pending.prevBallX = ballPosition.x;
     pending.prevBallY = ballPosition.y;
     pending.prevBallZ = ballPosition.z;
+
+    // A shot that comes back down to the floor without going in has
+    // missed - this attempt is decided either way, which matters for the
+    // buzzer-beater case above (a shot can only hold the period open
+    // while it's still genuinely unresolved) and also stops a stale
+    // miss from ever being re-evaluated against a later, unrelated
+    // bounce near this same hoop.
+    if (ballPosition.y <= CD.ball.radius + 0.05) {
+      this.pendingShot = null;
+    }
   }
 
   private callViolation(type: ViolationType, message: string): void {

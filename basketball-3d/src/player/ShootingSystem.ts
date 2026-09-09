@@ -28,12 +28,26 @@ export interface ShotResult {
 
 /**
  * Point value is judged from the shooter's foot position at release
- * (spec section 8), not where the ball ends up. This ignores the
- * corner-vs-arc distinction in the real three-point line's geometry
- * (spec section 25's real dimensions do carry both) and uses one arc
- * distance uniformly - a deliberate simplification, not an oversight.
+ * (spec section 8), not where the ball ends up. Rule 4-Section I's actual
+ * three-point line is two pieces: a straight segment parallel to the
+ * sideline near each corner (cornerDistance from the centerline, running
+ * cornerLineLength in from the baseline - the same geometry Court.ts
+ * already draws), and an arc everywhere else. A prior version of this
+ * function used one uniform arc distance for the whole line, which made
+ * the corner three require standing roughly 1.7ft farther out than the
+ * real line does - a shooter behind the drawn corner line could still be
+ * scored as a 2.
  */
 function pointsForRelease(releasePos: THREE.Vector3, hoop: Hoop): 2 | 3 {
+  const side: 1 | -1 = hoop.rimCenter.x >= 0 ? 1 : -1;
+  const baselineX = side * (CD.length / 2);
+  const distFromBaseline = side * (baselineX - releasePos.x);
+  const lateralOffset = Math.abs(releasePos.z);
+
+  if (distFromBaseline <= CD.threePoint.cornerLineLength && lateralOffset >= CD.threePoint.cornerDistance) {
+    return 3;
+  }
+
   const dist = Math.hypot(releasePos.x - hoop.rimCenter.x, releasePos.z - hoop.rimCenter.z);
   return dist >= CD.threePoint.arcDistance ? 3 : 2;
 }

@@ -1,8 +1,17 @@
 import type { BasketballRules } from '@/basketball/BasketballRules';
 
+/** Rule 3-Section II-8: "The game clock shall be equipped to show tenths-of-a-second during the last minute of each period." */
+const TENTHS_THRESHOLD = 60;
+
 function formatClock(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  const clamped = Math.max(0, seconds);
+  if (clamped < TENTHS_THRESHOLD) {
+    const m = Math.floor(clamped / 60);
+    const s = clamped % 60;
+    return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+  }
+  const m = Math.floor(clamped / 60);
+  const s = Math.floor(clamped % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
