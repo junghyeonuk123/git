@@ -201,6 +201,9 @@ export class Game {
     // camera (CameraController) never rotates, so there is no camera yaw
     // to convert input against.
     this.playerController.fixedUpdate(dt, this.hoops);
+    if (this.player.position.y < -2) {
+      this.player.resetToGround();
+    }
     this.physics.step();
     this.updateNets(dt);
 
@@ -322,6 +325,7 @@ export class Game {
       `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
       `ballVel: ${v.length().toFixed(2)}`,
       `hasBall: ${this.playerController.hasBall}`,
+      `speed: ${this.playerController.movement.speed.toFixed(2)}  sprintActive: ${this.playerController.dribbleSprintActive}`,
       `playerState: ${this.playerController.stateMachine.current} (${this.playerController.stateMachine.timeInState.toFixed(2)}s)`,
       `ballOwnership: ${this.playerController.ballOwnership.current} (owner: ${this.playerController.ballOwnership.owner})`,
       `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,

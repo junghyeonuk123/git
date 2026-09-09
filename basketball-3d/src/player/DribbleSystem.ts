@@ -3,7 +3,15 @@ import type { Player } from './Player';
 import type { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 
-const DRIBBLE_HAND_HEIGHT = 0.78; // waist-ish, real dribble height
+// Gameplay-systems spec section 5: dribble height responds to movement
+// state instead of being one fixed pocket - low/tight while sprinting
+// (ball security over control), high/relaxed while set in triple threat,
+// normal in between. PlayerController picks which of these to pass in
+// each step based on PlayerStateMachine's current state.
+export const DRIBBLE_HEIGHT_LOW = 0.6; // sprint dribble
+export const DRIBBLE_HEIGHT_NORMAL = 0.78; // walking/standard dribble
+export const DRIBBLE_HEIGHT_HIGH = 0.88; // triple-threat, more control
+
 const MAX_HORIZONTAL_CORRECTION = 8; // m/s cap on the steering set at each bounce
 const CATCH_MARGIN = 0.05; // meters above the floor the "bounce" trigger arms within
 const BOUNCE_COOLDOWN = 0.2; // seconds, debounces re-triggering while the ball lingers near the floor
@@ -37,7 +45,7 @@ export class DribbleSystem {
     private readonly gravity: number,
   ) {}
 
-  fixedUpdate(dt: number, hand: 1 | -1): void {
+  fixedUpdate(dt: number, hand: 1 | -1, height: number = DRIBBLE_HEIGHT_NORMAL): void {
     this.cooldown = Math.max(0, this.cooldown - dt);
     if (this.cooldown > 0) return;
 
@@ -47,7 +55,7 @@ export class DribbleSystem {
     if (!nearFloor) return;
 
     this.cooldown = BOUNCE_COOLDOWN;
-    this.player.getHandPosition(this.handPos, hand, DRIBBLE_HAND_HEIGHT);
+    this.player.getHandPosition(this.handPos, hand, height);
 
     // Vertical speed needed to just reach hand height, i.e. v^2 = 2*g*h.
     const riseHeight = Math.max(0.15, this.handPos.y - floorY) * BOUNCE_HEIGHT_FACTOR;
@@ -64,6 +72,6 @@ export class DribbleSystem {
 
   /** Ball position the moment possession is lost/gained, useful for a clean handoff. */
   getHandAnchor(hand: 1 | -1, out: THREE.Vector3): THREE.Vector3 {
-    return this.player.getHandPosition(out, hand, DRIBBLE_HAND_HEIGHT);
+    return this.player.getHandPosition(out, hand, DRIBBLE_HEIGHT_NORMAL);
   }
 }

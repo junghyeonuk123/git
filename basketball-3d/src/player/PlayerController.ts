@@ -4,7 +4,7 @@ import type { Ball } from '@/basketball/Ball';
 import type { Hoop } from '@/basketball/Hoop';
 import type { Player } from './Player';
 import { PlayerMovement } from './PlayerMovement';
-import { DribbleSystem } from './DribbleSystem';
+import { DribbleSystem, DRIBBLE_HEIGHT_HIGH, DRIBBLE_HEIGHT_LOW, DRIBBLE_HEIGHT_NORMAL } from './DribbleSystem';
 import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
@@ -121,12 +121,23 @@ export class PlayerController {
 
     this.handleDribbleMoves(dt);
     this.dribbleSprintActive = sprint && this.movement.speed > 0.3;
-    this.dribble.fixedUpdate(dt, this.hand);
+    const isStationary = this.movement.speed < 0.3;
+    // Gameplay-systems spec section 5 ("low dribble / high dribble"): the
+    // pocket height itself responds to movement state, not just the
+    // visual crouch - tight and low while sprinting (ball security over
+    // control), higher and more relaxed set in triple threat, normal in
+    // between.
+    const dribbleHeight = this.dribbleSprintActive
+      ? DRIBBLE_HEIGHT_LOW
+      : isStationary
+        ? DRIBBLE_HEIGHT_HIGH
+        : DRIBBLE_HEIGHT_NORMAL;
+    this.dribble.fixedUpdate(dt, this.hand, dribbleHeight);
 
     const activeMove = this.moves.activeType;
     if (activeMove !== null) {
       this.stateMachine.enter(activeMove);
-    } else if (this.movement.speed < 0.3) {
+    } else if (isStationary) {
       this.stateMachine.enter('tripleThreat');
     } else {
       this.stateMachine.enter('dribbling');

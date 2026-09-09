@@ -269,6 +269,28 @@ export class Player {
   }
 
   /**
+   * Recovery for a rare character-controller failure mode distinct from
+   * the oversized-single-step glitch applyMovement already guards
+   * against: under sustained large per-tick displacement (this project's
+   * low-fps/software-rendered test environment can burst through many
+   * queued fixed steps in one query), the controller can occasionally
+   * report computedGrounded()=true for a step that actually leaves the
+   * player with nothing underneath, so gravity then integrates normally
+   * step after step - a real, gradually-accelerating fall, not a single
+   * bad correction, so the distSq clamp above never sees anything to
+   * reject. Snaps straight back to standing height at the current x/z
+   * and zeroes vertical velocity, same shape as Ball's existing y<-3
+   * safety net in Game.ts.
+   */
+  resetToGround(): void {
+    const { capsuleRadius, capsuleHeight } = CD.player;
+    const t = this.body.translation();
+    this.body.setNextKinematicTranslation({ x: t.x, y: capsuleHeight / 2 + capsuleRadius, z: t.z });
+    this.verticalVelocity = 0;
+    this.isGrounded = true;
+  }
+
+  /**
    * Procedural walk cycle: swings the hip/knee and shoulder pivots on a
    * phase that advances with distance traveled (not raw time), so leg
    * turnover speed naturally scales with movement speed instead of just
