@@ -38,7 +38,8 @@ export const CourtDimensions = {
     backboardBottomHeight: 9 * FT,
     backboardDistanceFromBaseline: 4 * FT,
     poleSetback: 1 * FT + 8 * IN, // additional structure behind the board
-    netHeight: 15 * IN,
+    netHeight: 18 * IN, // official rule: "a white cord net 18 inches in length"
+    restrictedAreaRadius: 4 * FT, // half-circle centered on the rim, closed by lines back to the backboard face
   },
 
   ball: {

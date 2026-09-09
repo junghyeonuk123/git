@@ -125,17 +125,26 @@ function buildCourtTexture(): THREE.CanvasTexture {
   strokeLine(0, -CD.width / 2, 0, CD.width / 2);
   strokeCircle(0, 0, CD.centerCircleRadius);
 
-  // both ends: paint, free-throw circle, three-point line
+  // both ends: paint, free-throw circle, three-point line, restricted area
   for (const side of [-1, 1] as const) {
     const baselineX = side * (CD.length / 2);
-    const rimX = baselineX - side * CD.hoop.backboardDistanceFromBaseline;
-    const ftLineX = baselineX - side * CD.freeThrowLineDistance;
+    // Backboard face position - NOT the rim center. The free-throw line is
+    // measured from here (rule: "15' from the plane of the face of the
+    // backboard"), while the rim/basket center sits rimDistanceFromBackboard
+    // further onto the court (same split Hoop.ts uses for its own rimX).
+    const backboardFaceX = baselineX - side * CD.hoop.backboardDistanceFromBaseline;
+    const rimCenterX = backboardFaceX - side * CD.hoop.rimDistanceFromBackboard;
+    // 4ft (backboard offset) + 15ft (free-throw distance) = 19ft from the
+    // baseline, matching both the paint's own length and the diagram's
+    // "19 FEET TO FREE THROW LINE (OUTSIDE)" - previously this measured
+    // 15ft straight from the baseline instead, landing inside the paint.
+    const ftLineX = backboardFaceX - side * CD.freeThrowLineDistance;
 
     strokeRect(baselineX, -CD.paint.width / 2, baselineX - side * CD.paint.length, CD.paint.width / 2);
     strokeCircle(ftLineX, 0, CD.paint.width / 2, 0, Math.PI * 2);
 
-    // three point arc, clipped to stay in front of the baseline
-    const [cx, cz] = toPx(rimX, 0);
+    // three point arc, centered on the actual rim/basket, clipped to stay in front of the baseline
+    const [cx, cz] = toPx(rimCenterX, 0);
     const r = CD.threePoint.arcDistance * TEXTURE_DENSITY;
     ctx.beginPath();
     if (side === 1) {
@@ -147,6 +156,20 @@ function buildCourtTexture(): THREE.CanvasTexture {
     const cornerZ = CD.threePoint.cornerDistance;
     strokeLine(baselineX, cornerZ * -1, baselineX - side * CD.threePoint.cornerLineLength, cornerZ * -1);
     strokeLine(baselineX, cornerZ, baselineX - side * CD.threePoint.cornerLineLength, cornerZ);
+
+    // Restricted area (rule section 9): a half-circle 4ft from the center
+    // of the rim, facing away from the backboard, closed by two straight
+    // lines running back to the backboard face parallel to the lane line.
+    const raRadius = CD.hoop.restrictedAreaRadius * TEXTURE_DENSITY;
+    ctx.beginPath();
+    if (side === 1) {
+      ctx.arc(cx, cz, raRadius, Math.PI * 0.5, Math.PI * 1.5);
+    } else {
+      ctx.arc(cx, cz, raRadius, -Math.PI * 0.5, Math.PI * 0.5);
+    }
+    ctx.stroke();
+    strokeLine(rimCenterX, -CD.hoop.restrictedAreaRadius, backboardFaceX, -CD.hoop.restrictedAreaRadius);
+    strokeLine(rimCenterX, CD.hoop.restrictedAreaRadius, backboardFaceX, CD.hoop.restrictedAreaRadius);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
