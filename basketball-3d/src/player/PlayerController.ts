@@ -8,6 +8,7 @@ import { DribbleSystem } from './DribbleSystem';
 import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
+import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
 
 const MOVE_ACTIONS: DribbleMoveType[] = ['crossover', 'hesitation', 'stepback', 'inAndOut', 'legsThrough'];
 
@@ -25,6 +26,8 @@ export class PlayerController {
   readonly moves: DribbleMoveSystem;
   readonly shooting: ShootingSystem;
   readonly passing: PassingSystem;
+  /** Phase 1 of the gameplay-systems spec: a single authoritative label for what the player is doing (see PlayerStateMachine.ts). */
+  readonly stateMachine = new PlayerStateMachine();
 
   hasBall = true;
   /** Which hand is dribbling - mutable now, since crossover/inAndOut/legsThrough switch it mid-dribble. */
@@ -70,6 +73,7 @@ export class PlayerController {
     }
 
     this.handlePossession(dt, hoops, sprint);
+    this.stateMachine.update(dt);
   }
 
   private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean): void {
@@ -86,8 +90,11 @@ export class PlayerController {
           this.lastShotResult = result;
           this.hasBall = false;
           this.dribbleSprintActive = false;
+          this.stateMachine.enter('release');
+          return;
         }
       }
+      this.stateMachine.enter('gather');
       return;
     }
 
@@ -95,17 +102,39 @@ export class PlayerController {
       this.passing.throwChestPass();
       this.hasBall = false;
       this.dribbleSprintActive = false;
+      this.stateMachine.enter('pass');
       return;
     }
 
     if (!this.hasBall) {
       this.dribbleSprintActive = false;
+      this.stateMachine.enter(this.computeLocomotionState(sprint));
       return;
     }
 
     this.handleDribbleMoves(dt);
     this.dribbleSprintActive = sprint && this.movement.speed > 0.3;
     this.dribble.fixedUpdate(dt, this.hand);
+
+    const activeMove = this.moves.activeType;
+    if (activeMove !== null) {
+      this.stateMachine.enter(activeMove);
+    } else if (this.movement.speed < 0.3) {
+      this.stateMachine.enter('tripleThreat');
+    } else {
+      this.stateMachine.enter('dribbling');
+    }
+  }
+
+  /**
+   * Only 'idle'/'walk'/'sprint' are reachable today - PlayerMovement has
+   * just two speed tiers (walkSpeed/sprintSpeed), no distinct third "run"
+   * speed to key a 'run' state off of, so that state stays defined but
+   * unused rather than backed by a made-up threshold.
+   */
+  private computeLocomotionState(sprint: boolean): PlayerState {
+    if (this.movement.speed < 0.05) return 'idle';
+    return sprint ? 'sprint' : 'walk';
   }
 
   private handleDribbleMoves(dt: number): void {

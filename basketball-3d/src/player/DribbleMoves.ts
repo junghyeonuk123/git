@@ -50,6 +50,11 @@ export class DribbleMoveSystem {
     return this.active !== null;
   }
 
+  /** Which move is currently mid-flight, for PlayerStateMachine to report as the player's current state. */
+  get activeType(): DribbleMoveType | null {
+    return this.active;
+  }
+
   /** @returns the hand this move switches the dribble to, or null if it doesn't. */
   trigger(type: DribbleMoveType, player: Player, hand: 1 | -1): 1 | -1 | null {
     if (this.active) return null;

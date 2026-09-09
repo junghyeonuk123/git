@@ -322,6 +322,8 @@ export class Game {
       `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
       `ballVel: ${v.length().toFixed(2)}`,
       `hasBall: ${this.playerController.hasBall}`,
+      `playerState: ${this.playerController.stateMachine.current} (${this.playerController.stateMachine.timeInState.toFixed(2)}s)`,
+      `ballOwnership: ${this.playerController.stateMachine.meta.ballOwnership}`,
       `shotState: ${this.playerController.shooting.state}`,
       `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
       `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}`,
