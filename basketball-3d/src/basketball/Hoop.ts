@@ -23,6 +23,8 @@ export class Hoop {
   readonly bankSpot: THREE.Vector3;
   readonly backboard: Backboard;
   readonly net: Net;
+  /** For shot-clock rule 7-Section IV-3-1: detecting whether a missed shot actually touched the rim. */
+  readonly rimCollider: import('@dimforge/rapier3d-compat').Collider;
 
   constructor(scene: THREE.Scene, physics: PhysicsWorld, side: 1 | -1) {
     const { rimRadius, rimTubeRadius, rimHeight, rimDistanceFromBackboard, backboardDistanceFromBaseline, poleSetback } =
@@ -59,7 +61,7 @@ export class Hoop {
       .setRestitution(PhysicsMaterials.rim.restitution)
       .setFriction(PhysicsMaterials.rim.friction)
       .setCollisionGroups(interactionGroups(CollisionGroup.Rim, CollisionGroup.Ball));
-    physics.world.createCollider(rimColliderDesc, rimBody);
+    this.rimCollider = physics.world.createCollider(rimColliderDesc, rimBody);
 
     // --- support structure
     const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.5, metalness: 0.6 });

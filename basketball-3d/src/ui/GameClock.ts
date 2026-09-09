@@ -25,8 +25,10 @@ export class GameClock {
     this.quarterEl.textContent = `Q${rules.quarter}`;
     this.clockEl.textContent = formatClock(rules.quarterClock);
 
-    const shotClock = Math.ceil(rules.shotClock);
-    this.shotClockEl.textContent = String(shotClock);
-    this.shotClockEl.classList.toggle('urgent', shotClock <= 5);
+    // Rule 7-Section I: "displayed in seconds, except tenths of seconds
+    // will also be displayed once the shot clock reaches 4.9 seconds."
+    const raw = Math.max(0, rules.shotClock);
+    this.shotClockEl.textContent = raw <= 4.9 ? raw.toFixed(1) : String(Math.ceil(raw));
+    this.shotClockEl.classList.toggle('urgent', raw <= 5);
   }
 }

@@ -12,11 +12,14 @@ export class PhysicsWorld {
 
   readonly world: RAPIER.World;
   readonly RAPIER: typeof RAPIER;
+  /** autoDrain=true: cleared automatically at the start of each step(), so callers only ever see this step's events. */
+  private readonly eventQueue: RAPIER.EventQueue;
 
   private constructor(rapier: typeof RAPIER, gravity: RAPIER.Vector3) {
     this.RAPIER = rapier;
     this.world = new rapier.World(gravity);
     this.world.timestep = 1 / 60;
+    this.eventQueue = new rapier.EventQueue(true);
   }
 
   static async create(gravityY = -9.81): Promise<PhysicsWorld> {
@@ -28,6 +31,11 @@ export class PhysicsWorld {
   }
 
   step(): void {
-    this.world.step();
+    this.world.step(this.eventQueue);
+  }
+
+  /** Collision-start/stop events (collider handle pairs) from the step that just ran. */
+  drainCollisionEvents(f: (handle1: number, handle2: number, started: boolean) => void): void {
+    this.eventQueue.drainCollisionEvents(f);
   }
 }

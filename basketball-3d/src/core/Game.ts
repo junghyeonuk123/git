@@ -210,6 +210,7 @@ export class Game {
       this.player.resetToGround();
     }
     this.physics.step();
+    this.checkRimContact();
     this.updateNets(dt);
 
     if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
@@ -224,6 +225,18 @@ export class Game {
 
     this.updateLooseBallRecovery();
   };
+
+  /** Rule 7-Section IV-4-1 needs to know whether a missed shot actually touched the rim (vs. an airball, which never resets the shot clock). */
+  private checkRimContact(): void {
+    const ballHandle = this.ball.collider.handle;
+    this.physics.drainCollisionEvents((handle1, handle2, started) => {
+      if (!started) return;
+      const isBallRim =
+        (handle1 === ballHandle && this.hoops.some((h) => h.rimCollider.handle === handle2)) ||
+        (handle2 === ballHandle && this.hoops.some((h) => h.rimCollider.handle === handle1));
+      if (isBallRim) this.rules.notifyRimContact();
+    });
+  }
 
   /** Net physics (spec section 7): simulate each hoop's net and let the ball disturb it when nearby. */
   private updateNets(dt: number): void {

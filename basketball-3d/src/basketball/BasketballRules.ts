@@ -5,6 +5,8 @@ import type { ShotResult } from '@/player/ShootingSystem';
 
 const QUARTER_SECONDS = 12 * 60;
 const SHOT_CLOCK_SECONDS = 24;
+/** Rule 7-Section IV-4-1: reset (not just resumed) to 14 when the offensive player is first to gain possession after their own missed attempt that touched the rim. */
+const SHOT_CLOCK_REBOUND_SECONDS = 14;
 const PAINT_VIOLATION_SECONDS = 3;
 const TOTAL_QUARTERS = 4;
 
@@ -44,6 +46,8 @@ interface PendingShot {
   prevBallX: number;
   prevBallY: number;
   prevBallZ: number;
+  /** Set by notifyRimContact() - distinguishes a real miss (rule 7-IV-4-1, resets to 14) from an airball that never touched iron (rule 7-IV-2-5, no reset at all). */
+  touchedRim: boolean;
 }
 
 export class BasketballRules {
@@ -59,6 +63,9 @@ export class BasketballRules {
   private pendingShot: PendingShot | null = null;
   /** Rule 4-Section III-1-a-i: a field goal already in flight when the clock hits :00.0 still gets to finish. */
   private periodEndPending = false;
+  /** Set when a missed shot that touched the rim resolves, consumed on the next hasBall false->true transition. */
+  private reboundBonusPending = false;
+  private prevHasBall = true;
   private elapsed = 0;
   /** Set for one fixedUpdate call when a violation/turnover should hand the ball back. */
   turnoverRequested = false;
@@ -71,7 +78,13 @@ export class BasketballRules {
       prevBallX: ballPosition.x,
       prevBallY: ballPosition.y,
       prevBallZ: ballPosition.z,
+      touchedRim: false,
     };
+  }
+
+  /** Call from Game.ts whenever the physics step reports a ball/rim collision starting. */
+  notifyRimContact(): void {
+    if (this.pendingShot) this.pendingShot.touchedRim = true;
   }
 
   /** Call once per fixed physics step. */
@@ -79,6 +92,12 @@ export class BasketballRules {
     this.turnoverRequested = false;
     if (!this.running) return;
     this.elapsed += dt;
+
+    if (hasBall && !this.prevHasBall && this.reboundBonusPending) {
+      this.shotClock = SHOT_CLOCK_REBOUND_SECONDS;
+      this.reboundBonusPending = false;
+    }
+    this.prevHasBall = hasBall;
 
     this.updateClock(dt);
     if (RuleConfig.shotClock) this.updateShotClock(dt, hasBall);
@@ -188,6 +207,7 @@ export class BasketballRules {
     // miss from ever being re-evaluated against a later, unrelated
     // bounce near this same hoop.
     if (ballPosition.y <= CD.ball.radius + 0.05) {
+      if (pending.touchedRim) this.reboundBonusPending = true;
       this.pendingShot = null;
     }
   }
@@ -196,6 +216,7 @@ export class BasketballRules {
     this.lastViolationType = type;
     this.turnoverRequested = true;
     this.pendingShot = null;
+    this.reboundBonusPending = false;
     this.resetShotClock();
     this.emit('violation', message);
   }

@@ -12,6 +12,7 @@ import { CourtDimensions as CD } from './CourtDimensions';
 export class Ball {
   readonly mesh: THREE.Mesh;
   readonly body: import('@dimforge/rapier3d-compat').RigidBody;
+  readonly collider: import('@dimforge/rapier3d-compat').Collider;
   private readonly seamGroup: THREE.Group;
 
   constructor(scene: THREE.Scene, physics: PhysicsWorld, spawn: THREE.Vector3) {
@@ -63,7 +64,7 @@ export class Ball {
         ),
       )
       .setActiveEvents(physics.RAPIER.ActiveEvents.COLLISION_EVENTS);
-    physics.world.createCollider(colliderDesc, this.body);
+    this.collider = physics.world.createCollider(colliderDesc, this.body);
   }
 
   /** Copy the physics transform onto the render mesh. Call after each physics step. */
