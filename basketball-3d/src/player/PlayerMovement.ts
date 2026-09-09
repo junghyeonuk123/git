@@ -31,26 +31,27 @@ export class PlayerMovement {
   constructor(private readonly config: PlayerMovementConfig = DEFAULT_MOVEMENT_CONFIG) {}
 
   /**
-   * @param inputAxis normalized {x: strafe, y: forward} in [-1,1], camera-local
-   * @param cameraYaw camera's yaw so input becomes a world-space direction
+   * @param inputAxis normalized {x: strafe, y: forward} in [-1,1]
    * @param sprint whether the sprint modifier is held
    * @param dt fixed physics timestep seconds
    * @returns world-space horizontal displacement for this step
+   *
+   * Movement is world-relative, matching the fixed broadcast camera
+   * (CameraController never rotates - see spec section 21). The camera
+   * sits on the -Z sideline looking toward +Z, which makes its
+   * screen-right vector world -X (right = forward x up = (0,0,1)x(0,1,0)
+   * = (-1,0,0)) - so "move right" has to negate input.x, not pass it
+   * through, or D would visibly walk the character left.
    */
-  step(inputAxis: { x: number; y: number }, cameraYaw: number, sprint: boolean, dt: number): THREE.Vector2 {
+  step(inputAxis: { x: number; y: number }, sprint: boolean, dt: number): THREE.Vector2 {
     const hasInput = inputAxis.x !== 0 || inputAxis.y !== 0;
     const maxSpeed = sprint ? this.config.sprintSpeed : this.config.walkSpeed;
 
     let targetVx = 0;
     let targetVz = 0;
     if (hasInput) {
-      // rotate the camera-local input axis into world space around Y
-      const sin = Math.sin(cameraYaw);
-      const cos = Math.cos(cameraYaw);
-      const worldX = inputAxis.x * cos + inputAxis.y * sin;
-      const worldZ = -inputAxis.x * sin + inputAxis.y * cos;
-      targetVx = worldX * maxSpeed;
-      targetVz = worldZ * maxSpeed;
+      targetVx = -inputAxis.x * maxSpeed;
+      targetVz = inputAxis.y * maxSpeed;
     }
 
     const rate = hasInput ? this.config.acceleration : this.config.deceleration;

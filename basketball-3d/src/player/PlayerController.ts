@@ -40,13 +40,12 @@ export class PlayerController {
 
   /**
    * Call once per fixed physics step. Movement is world-relative (the
-   * broadcast camera never rotates - see CameraController), so the
-   * "camera yaw" movement is expressed against is always 0: pressing W
-   * always walks toward +Z, D always toward +X, in world space.
+   * broadcast camera never rotates - see CameraController and
+   * PlayerMovement.step for the exact screen-to-world mapping).
    */
   fixedUpdate(dt: number, hoops: readonly Hoop[]): void {
     const sprint = this.input.isDown('sprint');
-    const displacement = this.movement.step(this.input.moveAxis, 0, sprint, dt);
+    const displacement = this.movement.step(this.input.moveAxis, sprint, dt);
     this.player.applyMovement(displacement, dt);
 
     if (this.movement.speed > 0.05) {

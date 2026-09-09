@@ -157,12 +157,25 @@ export class Player {
     const corrected = this.characterController.computedMovement();
     this.isGrounded = this.characterController.computedGrounded();
 
+    // Defensive clamp: Rapier's character controller has occasionally
+    // returned a wildly oversized correction (multi-meter teleports) under
+    // this project's headless/software-rendered test environment, which
+    // runs so far below 60fps that a single rAF frame can burst through
+    // many queued fixed steps at once. A single physics step can never
+    // legitimately move the player more than a small fraction of a meter,
+    // so anything past that is treated as a bad result and dropped rather
+    // than applied.
+    const distSq = corrected.x * corrected.x + corrected.y * corrected.y + corrected.z * corrected.z;
+    const isSane = Number.isFinite(distSq) && distSq < 1;
     const current = this.body.translation();
     this.body.setNextKinematicTranslation({
-      x: current.x + corrected.x,
-      y: current.y + corrected.y,
-      z: current.z + corrected.z,
+      x: current.x + (isSane ? corrected.x : 0),
+      y: current.y + (isSane ? corrected.y : 0),
+      z: current.z + (isSane ? corrected.z : 0),
     });
+    if (!isSane) {
+      this.verticalVelocity = 0;
+    }
 
     if (this.isGrounded && this.verticalVelocity < 0) {
       this.verticalVelocity = 0;

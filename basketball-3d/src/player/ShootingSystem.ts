@@ -7,11 +7,14 @@ import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 
 const GATHER_HEIGHT = 1.3; // chest/set-point height for the ball while charging
 const FILL_RATE = 1.0; // meter units per second
-const METER_CAP = 1.15;
-const ZONE_WEAK_MAX = 0.62; // also doubles as the swish window's lower bound
-const ZONE_SWISH_MAX = 0.7;
-const ZONE_BANK_MAX = 0.8;
 const BACKSPIN = 26; // rad/s, purely visual - see Ball seam rendering
+
+// Exported so ui/ShotMeter.ts draws the exact same zone boundaries the
+// release logic below actually uses - one source of truth.
+export const METER_CAP = 1.15;
+export const ZONE_WEAK_MAX = 0.62; // also doubles as the swish window's lower bound
+export const ZONE_SWISH_MAX = 0.7;
+export const ZONE_BANK_MAX = 0.8;
 
 export type ShotZone = 'weak' | 'swish' | 'bank' | 'strong';
 
@@ -35,7 +38,7 @@ function pointsForRelease(releasePos: THREE.Vector3, hoop: Hoop): 2 | 3 {
   return dist >= CD.threePoint.arcDistance ? 3 : 2;
 }
 
-function classifyMeter(meter: number): ShotZone {
+export function classifyMeter(meter: number): ShotZone {
   if (meter <= ZONE_WEAK_MAX) return 'weak';
   if (meter <= ZONE_SWISH_MAX) return 'swish';
   if (meter <= ZONE_BANK_MAX) return 'bank';

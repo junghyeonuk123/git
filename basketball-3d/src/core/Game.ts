@@ -13,6 +13,7 @@ import type { ShotResult } from '@/player/ShootingSystem';
 import { CameraController } from '@/camera/CameraController';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { GameClock } from '@/ui/GameClock';
+import { ShotMeter } from '@/ui/ShotMeter';
 
 export interface LoadProgressCallback {
   (fraction: number, statusText: string): void;
@@ -40,6 +41,7 @@ export class Game {
   private readonly rules = new BasketballRules();
   private readonly scoreboard = new Scoreboard();
   private readonly gameClock = new GameClock();
+  private readonly shotMeter = new ShotMeter();
   private lastSeenShotResult: ShotResult | null = null;
 
   private looseBallTimer = 0;
@@ -214,6 +216,7 @@ export class Game {
 
     this.scoreboard.update(this.rules, dt);
     this.gameClock.update(this.rules);
+    this.shotMeter.update(this.playerController.shooting);
 
     if (this.debugEnabled) {
       this.renderDebugPanel(dt);

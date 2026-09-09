@@ -173,6 +173,79 @@ body {
   color: #f4f6fb;
 }
 
+#shot-meter {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* A same-specificity `display` rule on the id selector above would beat
+   the UUA stylesheet's [hidden]{display:none}, so it has to be undone
+   explicitly here rather than relying on the attribute alone. */
+#shot-meter[hidden] {
+  display: none;
+}
+
+#shot-meter-track {
+  position: relative;
+  width: 26px;
+  height: 260px;
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid rgba(244, 246, 251, 0.55);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Flex-grow is proportional to each zone's width on the 0..METER_CAP
+   scale (see ShootingSystem.ts's ZONE_* constants) - weak 0.62, swish
+   0.08, bank 0.1, strong 0.35 - so the bar's bands actually line up
+   with the release windows the shooting logic uses. */
+.shot-meter-zone[data-zone='weak'] {
+  flex-grow: 62;
+  background: #5b6472;
+}
+.shot-meter-zone[data-zone='swish'] {
+  flex-grow: 8;
+  background: #2ecc71;
+}
+.shot-meter-zone[data-zone='bank'] {
+  flex-grow: 10;
+  background: #3498db;
+}
+.shot-meter-zone[data-zone='strong'] {
+  flex-grow: 35;
+  background: #e74c3c;
+}
+
+#shot-meter-pointer {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  height: 4px;
+  background: #f4f6fb;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  bottom: 0%;
+  transition: bottom 0.03s linear;
+}
+
+#shot-meter-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f4f6fb;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  min-height: 1.2em;
+}
+
 #hint {
   position: absolute;
   bottom: 14px;
