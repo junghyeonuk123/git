@@ -20,6 +20,28 @@ export interface LoadProgressCallback {
 }
 
 /**
+ * A cheap stand-in for real arena geometry (Phase 8): a vertical gradient
+ * from dark ceiling to a warmer glow near the horizon, instead of one flat
+ * background color. Costs nothing at runtime (baked once at load) but goes
+ * a long way toward not reading as an empty void around the court.
+ */
+function buildArenaGradient(): THREE.Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#05070c');
+  gradient.addColorStop(0.55, '#0d1420');
+  gradient.addColorStop(1, '#232f42');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
  * Top-level orchestrator. Owns the render/physics setup and wires every
  * system's per-frame update, but contains no gameplay rules itself -
  * that keeps this file from growing into the "one giant main.ts" the
@@ -46,6 +68,8 @@ export class Game {
 
   private looseBallTimer = 0;
   private readonly GRAVITY_MAGNITUDE = 9.81;
+  /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
+  private readonly playerLight = new THREE.PointLight(0xfff2df, 9, 7, 2);
 
   private debugEnabled = false;
   private readonly debugPanel = document.getElementById('debug-panel') as HTMLDivElement;
@@ -108,12 +132,14 @@ export class Game {
   }
 
   private setupSceneBasics(): void {
-    this.scene.background = new THREE.Color(0x0d1018);
-    this.scene.fog = new THREE.Fog(0x0d1018, 26, 68);
+    const bg = buildArenaGradient();
+    this.scene.background = bg;
+    this.scene.fog = new THREE.Fog(0x0d1420, 26, 68);
 
     const hemi = new THREE.HemisphereLight(0x8fa6c9, 0x1a1410, 0.55);
     this.scene.add(hemi);
 
+    // key light
     const sun = new THREE.DirectionalLight(0xfff2df, 2.1);
     sun.position.set(12, 18, 8);
     sun.castShadow = true;
@@ -127,9 +153,38 @@ export class Game {
     sun.shadow.bias = -0.0015;
     this.scene.add(sun);
 
+    // fill light, softening the key light's shadow side
     const fill = new THREE.DirectionalLight(0x9db7ff, 0.35);
     fill.position.set(-10, 10, -10);
     this.scene.add(fill);
+
+    // rim/kicker light: positioned behind the play relative to the fixed
+    // broadcast camera (which sits on the -Z side looking toward +Z), so
+    // it catches shoulder/head edges and helps players separate from the
+    // dark background instead of reading as flat silhouettes.
+    const rim = new THREE.DirectionalLight(0xbcd4ff, 0.6);
+    rim.position.set(-4, 7, 22);
+    this.scene.add(rim);
+
+    // overhead arena lighting rig: a handful of non-shadow-casting point
+    // lights above center court and each hoop, mainly there to put a
+    // visible specular highlight on the clearcoat hardwood (spec section
+    // 19/21) - a flat court under directional light alone doesn't read as
+    // "under stadium lights."
+    const rigPositions: Array<[number, number, number]> = [
+      [0, 9.5, 0],
+      [CD.length / 2 - 6, 8.5, 0],
+      [-(CD.length / 2 - 6), 8.5, 0],
+    ];
+    for (const [x, y, z] of rigPositions) {
+      const rig = new THREE.PointLight(0xfff6e0, 55, 24, 2);
+      rig.position.set(x, y, z);
+      this.scene.add(rig);
+    }
+
+    // accent light tracking the controlled player - see fixedUpdate/update
+    // for the per-frame position sync
+    this.scene.add(this.playerLight);
   }
 
   private readonly fixedUpdate = (dt: number): void => {
@@ -209,6 +264,7 @@ export class Game {
       dt,
       this.playerController.dribbleSprintActive ? 1 : 0,
     );
+    this.playerLight.position.set(this.player.position.x, this.player.position.y + 2.4, this.player.position.z);
     this.ball.syncFromPhysics();
     if (this.playerController.hasBall) {
       // visually plants the dribbling hand on the ball instead of letting
