@@ -28,13 +28,14 @@ export type BallOwnershipMode =
   | 'shot'
   | 'pass'
   | 'dunk'
-  | 'rebound';
+  | 'rebound'
+  | 'recovery';
 
 export type BallOwner = 'none' | 'dribble' | 'shooting' | 'passing';
 
 /** Whether the ball's Rapier body is expected to be kinematic (held) or dynamic (physics-driven) in a given mode. */
 function expectedKinematic(mode: BallOwnershipMode): boolean {
-  return mode === 'gather';
+  return mode === 'gather' || mode === 'recovery';
 }
 
 export class BallOwnershipTracker {

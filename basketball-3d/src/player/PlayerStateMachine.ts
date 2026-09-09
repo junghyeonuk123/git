@@ -32,6 +32,8 @@ export type PlayerState =
   // on-ball
   | 'tripleThreat'
   | 'dribbling'
+  // loose-ball recovery (see LooseBallRecovery.ts)
+  | 'recovering'
   // dribble moves - named to match DribbleMoveSystem's DribbleMoveType
   // where one already exists, so there's no separate translation layer
   | 'crossover'

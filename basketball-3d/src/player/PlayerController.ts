@@ -10,6 +10,7 @@ import { ShootingSystem, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
 import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
 import { BallOwnershipTracker } from '@/basketball/BallOwnership';
+import { LooseBallRecoverySystem } from '@/basketball/LooseBallRecovery';
 
 const MOVE_ACTIONS: DribbleMoveType[] = ['crossover', 'hesitation', 'stepback', 'inAndOut', 'legsThrough'];
 
@@ -31,6 +32,7 @@ export class PlayerController {
   readonly stateMachine = new PlayerStateMachine();
   /** Phase 2: single authoritative record of which system currently owns the ball's position (see BallOwnership.ts). */
   readonly ballOwnership = new BallOwnershipTracker();
+  readonly looseBallRecovery = new LooseBallRecoverySystem();
 
   hasBall = true;
   /** Which hand is dribbling - mutable now, since crossover/inAndOut/legsThrough switch it mid-dribble. */
@@ -114,8 +116,18 @@ export class PlayerController {
 
     if (!this.hasBall) {
       this.dribbleSprintActive = false;
-      this.stateMachine.enter(this.computeLocomotionState(sprint));
-      this.ballOwnership.claim('free', 'none');
+      const secured = this.looseBallRecovery.update(dt, this.player, this.ball, this.dribble, this.hand);
+      if (secured) {
+        this.hasBall = true;
+        this.stateMachine.enter('tripleThreat');
+        this.ballOwnership.claim(this.hand === 1 ? 'controlledRight' : 'controlledLeft', 'dribble');
+      } else if (this.looseBallRecovery.isRecovering) {
+        this.stateMachine.enter('recovering');
+        this.ballOwnership.claim('recovery', 'dribble');
+      } else {
+        this.stateMachine.enter(this.computeLocomotionState(sprint));
+        this.ballOwnership.claim('free', 'none');
+      }
       return;
     }
 

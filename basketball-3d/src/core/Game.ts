@@ -12,6 +12,7 @@ import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
 import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
+import { classifyBallMotion } from '@/basketball/LooseBallRecovery';
 import { CameraController } from '@/camera/CameraController';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { GameClock } from '@/ui/GameClock';
@@ -71,7 +72,6 @@ export class Game {
   private lastSeenRuleEventAt = -1;
   private elapsedTime = 0;
 
-  private looseBallTimer = 0;
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
   private readonly playerLight = new THREE.PointLight(0xfff2df, 9, 7, 2);
@@ -217,7 +217,7 @@ export class Game {
       this.crowd.triggerCheer();
     }
 
-    this.updateLooseBallRecovery(dt);
+    this.updateLooseBallRecovery();
   };
 
   /** Net physics (spec section 7): simulate each hoop's net and let the ball disturb it when nearby. */
@@ -237,12 +237,21 @@ export class Game {
   }
 
   /**
-   * No defenders/AI exist yet (Phase 5) and there's no second team to
-   * award a turnover to, so a made basket, a violation, or a loose ball
-   * that comes to rest all resolve the same way in this practice-mode
-   * loop: hand the ball back to the player.
+   * Normal loose-ball recovery (the player running down and picking up a
+   * live ball) is handled every tick inside PlayerController via
+   * LooseBallRecoverySystem - real proximity/orientation/ball-speed
+   * gating and a brief grab interpolation instead of a teleport (see
+   * LooseBallRecovery.ts for why the old approach here, a pure "ball has
+   * been slow for 1.2s" timer with no player-position check at all,
+   * could leave a player standing right next to a rolling ball forever).
+   *
+   * What's left here are the two cases that are legitimately an instant
+   * administrative reset, not a physical recovery: the ball leaving the
+   * playable world entirely, and a rules-forced dead ball. No defenders/
+   * AI exist yet (Phase 5) and there's no second team to award a
+   * turnover to, so both just hand the ball back to the player.
    */
-  private updateLooseBallRecovery(dt: number): void {
+  private updateLooseBallRecovery(): void {
     // Hard safety net unrelated to game rules: an overpowered shot could
     // in principle clear the finite floor collider entirely and free-fall
     // forever with nothing left to bounce off of.
@@ -253,24 +262,12 @@ export class Game {
 
     if (this.rules.turnoverRequested) {
       this.recoverBall();
-      return;
-    }
-
-    if (this.playerController.hasBall) {
-      this.looseBallTimer = 0;
-      return;
-    }
-    const speed = this.ball.linearVelocity.length();
-    this.looseBallTimer = speed < 0.4 ? this.looseBallTimer + dt : 0;
-    if (this.looseBallTimer > 1.2) {
-      this.recoverBall();
     }
   }
 
   private recoverBall(): void {
     this.playerController.regainPossession();
     this.playerController.placeBallInHand();
-    this.looseBallTimer = 0;
   }
 
   private readonly update = (dt: number, _alpha: number): void => {
@@ -325,6 +322,7 @@ export class Game {
       `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
       `ballVel: ${v.length().toFixed(2)}`,
       `hasBall: ${this.playerController.hasBall}`,
+      `ballMotion: ${classifyBallMotion(this.ball)}  distToBall: ${p.distanceTo(bp).toFixed(2)}  recovering: ${this.playerController.looseBallRecovery.isRecovering}`,
       `speed: ${this.playerController.movement.speed.toFixed(2)}  sprintActive: ${this.playerController.dribbleSprintActive}`,
       `playerState: ${this.playerController.stateMachine.current} (${this.playerController.stateMachine.timeInState.toFixed(2)}s)`,
       `ballOwnership: ${this.playerController.ballOwnership.current} (owner: ${this.playerController.ballOwnership.owner})`,
