@@ -12,11 +12,12 @@ import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
 import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
-import { classifyBallMotion } from '@/basketball/LooseBallRecovery';
+import { classifyBallMotion, isRecoverable } from '@/basketball/LooseBallRecovery';
 import { CameraController } from '@/camera/CameraController';
 import { Scoreboard } from '@/ui/Scoreboard';
 import { GameClock } from '@/ui/GameClock';
 import { ShotMeter } from '@/ui/ShotMeter';
+import { PickupIndicator } from '@/ui/PickupIndicator';
 
 export interface LoadProgressCallback {
   (fraction: number, statusText: string): void;
@@ -68,6 +69,7 @@ export class Game {
   private readonly scoreboard = new Scoreboard();
   private readonly gameClock = new GameClock();
   private readonly shotMeter = new ShotMeter();
+  private readonly pickupIndicator = new PickupIndicator();
   private lastSeenShotResult: ShotResult | null = null;
   private lastSeenRuleEventAt = -1;
   private elapsedTime = 0;
@@ -292,11 +294,13 @@ export class Game {
       speed: this.playerController.movement.speed,
       charging,
       chargeFocusX: charging ? nearestHoop(this.hoops, this.ball.position).rimCenter.x : null,
+      hasBall: this.playerController.hasBall,
     });
 
     this.scoreboard.update(this.rules, dt);
     this.gameClock.update(this.rules);
     this.shotMeter.update(this.playerController.shooting);
+    this.pickupIndicator.update(!this.playerController.hasBall && isRecoverable(this.player, this.ball));
 
     if (this.debugEnabled) {
       this.renderDebugPanel(dt);

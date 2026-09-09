@@ -33,12 +33,15 @@ export interface CameraContext {
   charging: boolean;
   /** World X of the hoop being aimed at, only meaningful while `charging` is true. */
   chargeFocusX: number | null;
+  /** False while the ball is loose (no one's dribbling it) - pulls the framing further toward the ball so a rolling/bouncing loose ball never drifts out of frame (spec section 33). */
+  hasBall: boolean;
 }
 
 const FOV_SPEED_BOOST = 5; // degrees of extra FOV at full sprint - sells speed without moving the camera
 const FOV_CHARGE_NARROW = 3; // degrees narrower while lining up a shot - a gentle "focus" cue
 const DISTANCE_SPEED_PULLBACK = 2.2; // meters pulled back at full sprint, keeping fast movement framed
 const CHARGE_FOCUS_BLEND = 0.3; // how strongly the shot target hoop pulls the framing while charging
+const LOOSE_BALL_INFLUENCE = 0.55; // ballInfluence while the ball is loose, up from the normal 0.3 - keeps a chased loose ball on screen
 const FOV_LAMBDA = 4;
 const DISTANCE_LAMBDA = 3;
 
@@ -85,8 +88,9 @@ export class CameraController {
 
   /** Call once per rendered frame with the play's current focal points and context. */
   update(playerPosition: THREE.Vector3, ballPosition: THREE.Vector3, dt: number, context: CameraContext): void {
-    let focusX = THREE.MathUtils.lerp(playerPosition.x, ballPosition.x, this.config.ballInfluence);
-    const focusZ = THREE.MathUtils.lerp(playerPosition.z, ballPosition.z, this.config.ballInfluence);
+    const ballInfluence = context.hasBall ? this.config.ballInfluence : LOOSE_BALL_INFLUENCE;
+    let focusX = THREE.MathUtils.lerp(playerPosition.x, ballPosition.x, ballInfluence);
+    const focusZ = THREE.MathUtils.lerp(playerPosition.z, ballPosition.z, ballInfluence);
     if (context.charging && context.chargeFocusX !== null) {
       focusX = THREE.MathUtils.lerp(focusX, context.chargeFocusX, CHARGE_FOCUS_BLEND);
     }

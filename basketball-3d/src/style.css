@@ -173,6 +173,40 @@ body {
   color: #f4f6fb;
 }
 
+/* Only ever shown when LooseBallRecovery.isRecoverable() is true this frame - see PickupIndicator.ts. */
+#pickup-indicator {
+  position: absolute;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 18px;
+  background: rgba(46, 204, 113, 0.92);
+  color: #0d1018;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  border-radius: 8px;
+  z-index: 10;
+  pointer-events: none;
+  animation: pickup-pulse 1s ease-in-out infinite;
+}
+
+#pickup-indicator[hidden] {
+  display: none;
+}
+
+@keyframes pickup-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
 #shot-meter {
   position: absolute;
   left: 28px;

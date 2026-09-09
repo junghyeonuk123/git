@@ -36,6 +36,36 @@ export function classifyBallMotion(ball: Ball): LooseBallMotion {
   return onFloor && Math.abs(v.y) < 0.3 ? 'rolling' : 'bouncing';
 }
 
+const scratchCheck = new THREE.Vector3();
+
+/**
+ * The same gating LooseBallRecoverySystem.update() uses to decide whether
+ * to begin a grab, factored out as a pure read-only check so the "PICK
+ * UP" UI prompt (spec section 34) can ask "would this succeed right now"
+ * every render frame without it costing a state mutation or being a
+ * second, potentially-drifting copy of the real rule.
+ */
+export function isRecoverable(player: Player, ball: Ball, zones: RecoveryZones = DEFAULT_RECOVERY_ZONES): boolean {
+  const ballPos = ball.position;
+  const ballHeight = ballPos.y - CD.ball.radius;
+  if (ballHeight > MAX_GRABBABLE_HEIGHT) return false;
+
+  scratchCheck.set(ballPos.x - player.position.x, 0, ballPos.z - player.position.z);
+  const dist = scratchCheck.length();
+  if (dist > zones.recoveryRange) return false;
+
+  const speedT = THREE.MathUtils.clamp(ball.linearVelocity.length() / FAST_SPEED_REF, 0, 1);
+  const effectiveRange = THREE.MathUtils.lerp(zones.recoveryRange, zones.handRange, speedT);
+  if (dist > effectiveRange) return false;
+
+  if (dist > zones.handRange) {
+    const dot = player.facingDirection.dot(scratchCheck.clone().normalize());
+    if (dot < FACING_DOT_MIN) return false;
+  }
+
+  return true;
+}
+
 /**
  * Fixes the actual reported bug: the old recovery logic (see Game.ts's
  * previous updateLooseBallRecovery) never looked at the player at all -
@@ -88,32 +118,11 @@ export class LooseBallRecoverySystem {
       return true;
     }
 
-    const ballPos = ball.position;
-    const ballHeight = ballPos.y - CD.ball.radius;
-    if (ballHeight > MAX_GRABBABLE_HEIGHT) return false;
-
-    this.scratch.set(ballPos.x - player.position.x, 0, ballPos.z - player.position.z);
-    const dist = this.scratch.length();
-    if (dist > this.zones.recoveryRange) return false;
-
-    // Faster loose balls need a genuine, closer interception, not just a
-    // nearby jog-by - the effective pickup window shrinks toward
-    // handRange as the ball speeds up (spec sections 8/9/39: this is a
-    // hard cap far short of a "magnetic radius," never more than
-    // recoveryRange, and shrinking, not growing, with distance/speed).
-    const speedT = THREE.MathUtils.clamp(ball.linearVelocity.length() / FAST_SPEED_REF, 0, 1);
-    const effectiveRange = THREE.MathUtils.lerp(this.zones.recoveryRange, this.zones.handRange, speedT);
-    if (dist > effectiveRange) return false;
-
-    if (dist > this.zones.handRange) {
-      const dirToBall = this.scratch.clone().normalize();
-      const dot = player.facingDirection.dot(dirToBall);
-      if (dot < FACING_DOT_MIN) return false; // ball is well behind the player and not close enough to grab blindly
-    }
+    if (!isRecoverable(player, ball, this.zones)) return false;
 
     this.grabbing = true;
     this.grabTimer = 0;
-    this.grabStart.copy(ballPos);
+    this.grabStart.copy(ball.position);
     dribble.getHandAnchor(hand, this.grabTarget);
     return false;
   }
