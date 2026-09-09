@@ -204,7 +204,11 @@ export class Game {
 
   private readonly update = (dt: number, _alpha: number): void => {
     this.player.syncFromPhysics();
-    this.player.updateWalkCycle(this.playerController.movement.speed, dt);
+    this.player.updateWalkCycle(
+      this.playerController.movement.speed,
+      dt,
+      this.playerController.dribbleSprintActive ? 1 : 0,
+    );
     this.ball.syncFromPhysics();
     if (this.playerController.hasBall) {
       // visually plants the dribbling hand on the ball instead of letting

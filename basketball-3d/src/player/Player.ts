@@ -100,6 +100,12 @@ const WALK_BOB_AMPLITUDE = 0.025; // meters
 const WALK_RAMP_SPEED = 0.3; // m/s at which swing amplitude reaches full strength
 const IDLE_SWAY_SPEED = 0.7; // rad/s
 
+/** Lowered athletic stance while sprint-dribbling (spec section 26 posture note). */
+const CROUCH_DROP = 0.05; // meters
+const CROUCH_KNEE_BEND = 0.3; // radians added to both legs
+const CROUCH_TORSO_LEAN = 0.15; // radians of forward torso lean
+const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
+
 export class Player {
   readonly visualRoot: THREE.Group;
   readonly body: RAPIER.RigidBody;
@@ -109,6 +115,7 @@ export class Player {
   private verticalVelocity = 0;
   private walkPhase = 0;
   private idleTime = 0;
+  private currentCrouch = 0;
   isGrounded = true;
 
   constructor(
@@ -193,7 +200,10 @@ export class Player {
    * once per rendered frame - this is purely visual and never touches
    * physics.
    */
-  updateWalkCycle(speed: number, dt: number): void {
+  updateWalkCycle(speed: number, dt: number, crouchTarget = 0): void {
+    const crouchT = 1 - Math.exp(-CROUCH_LAMBDA * dt);
+    this.currentCrouch += (crouchTarget - this.currentCrouch) * crouchT;
+
     const swingStrength = clamp(speed / WALK_RAMP_SPEED, 0, 1);
 
     if (speed > 0.01) {
@@ -204,17 +214,19 @@ export class Player {
     }
 
     const swing = Math.sin(this.walkPhase) * WALK_LEG_AMPLITUDE * swingStrength;
-    this.rig.legs.left.rotation.x = swing;
-    this.rig.legs.right.rotation.x = -swing;
+    const kneeBend = this.currentCrouch * CROUCH_KNEE_BEND;
+    this.rig.legs.left.rotation.x = swing + kneeBend;
+    this.rig.legs.right.rotation.x = -swing + kneeBend;
     this.rig.arms.left.rotation.x = -swing * WALK_ARM_AMPLITUDE_RATIO;
     this.rig.arms.right.rotation.x = swing * WALK_ARM_AMPLITUDE_RATIO;
 
     const bob = Math.abs(Math.sin(this.walkPhase * 2)) * WALK_BOB_AMPLITUDE * swingStrength;
     // subtle idle breathing sway so the character doesn't look frozen when standing still
     const idleSway = (1 - swingStrength) * Math.sin(this.idleTime * IDLE_SWAY_SPEED) * 0.01;
-    this.rig.torsoPivot.position.y = (SHOULDER_HEIGHT + HIP_HEIGHT) / 2 + idleSway;
+    this.rig.torsoPivot.position.y = (SHOULDER_HEIGHT + HIP_HEIGHT) / 2 + idleSway - this.currentCrouch * CROUCH_DROP;
+    this.rig.torsoPivot.rotation.x = this.currentCrouch * CROUCH_TORSO_LEAN;
     // called after syncFromPhysics each frame, so this offsets that frame's ground-truth foot height
-    this.visualRoot.position.y += bob;
+    this.visualRoot.position.y += bob - this.currentCrouch * CROUCH_DROP * 0.6;
   }
 
   /**

@@ -5,8 +5,11 @@ import type { Hoop } from '@/basketball/Hoop';
 import type { Player } from './Player';
 import { PlayerMovement } from './PlayerMovement';
 import { DribbleSystem } from './DribbleSystem';
+import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
+
+const MOVE_ACTIONS: DribbleMoveType[] = ['crossover', 'hesitation', 'stepback', 'inAndOut', 'legsThrough'];
 
 /**
  * Translates raw input + camera orientation into calls on Player/Movement,
@@ -19,11 +22,15 @@ import { PassingSystem } from './PassingSystem';
 export class PlayerController {
   readonly movement = new PlayerMovement();
   readonly dribble: DribbleSystem;
+  readonly moves: DribbleMoveSystem;
   readonly shooting: ShootingSystem;
   readonly passing: PassingSystem;
 
   hasBall = true;
-  readonly hand: 1 | -1 = 1;
+  /** Which hand is dribbling - mutable now, since crossover/inAndOut/legsThrough switch it mid-dribble. */
+  hand: 1 | -1 = 1;
+  /** True while sprinting with the ball live in hand - drives the lowered dribble stance (see Player.updateWalkCycle). */
+  dribbleSprintActive = false;
   lastShotResult: ShotResult | null = null;
 
   constructor(
@@ -33,7 +40,8 @@ export class PlayerController {
     physicsGravity: number,
     physicsDt: number,
   ) {
-    this.dribble = new DribbleSystem(player, ball);
+    this.dribble = new DribbleSystem(player, ball, physicsGravity);
+    this.moves = new DribbleMoveSystem(this.movement);
     this.shooting = new ShootingSystem(player, ball, physicsGravity, physicsDt);
     this.passing = new PassingSystem(player, ball, physicsGravity, physicsDt);
   }
@@ -52,10 +60,10 @@ export class PlayerController {
       this.player.setFacing(this.movement.facingYaw);
     }
 
-    this.handlePossession(dt, hoops);
+    this.handlePossession(dt, hoops, sprint);
   }
 
-  private handlePossession(dt: number, hoops: readonly Hoop[]): void {
+  private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean): void {
     if (this.hasBall && this.shooting.state === 'idle' && this.input.wasPressedThisFrame('shoot')) {
       this.shooting.startCharge();
     }
@@ -67,6 +75,7 @@ export class PlayerController {
         if (result) {
           this.lastShotResult = result;
           this.hasBall = false;
+          this.dribbleSprintActive = false;
         }
       }
       return;
@@ -75,11 +84,31 @@ export class PlayerController {
     if (this.hasBall && this.input.wasPressedThisFrame('pass')) {
       this.passing.throwChestPass();
       this.hasBall = false;
+      this.dribbleSprintActive = false;
       return;
     }
 
-    if (this.hasBall) {
-      this.dribble.fixedUpdate(dt, this.hand);
+    if (!this.hasBall) {
+      this.dribbleSprintActive = false;
+      return;
+    }
+
+    this.handleDribbleMoves(dt);
+    this.dribbleSprintActive = sprint && this.movement.speed > 0.3;
+    this.dribble.fixedUpdate(dt, this.hand);
+  }
+
+  private handleDribbleMoves(dt: number): void {
+    const midMoveSwitch = this.moves.fixedUpdate(dt, this.hand);
+    if (midMoveSwitch !== null) this.hand = midMoveSwitch;
+    if (this.moves.isActive) return;
+
+    for (const action of MOVE_ACTIONS) {
+      if (this.input.wasPressedThisFrame(action)) {
+        const newHand = this.moves.trigger(action, this.player, this.hand);
+        if (newHand !== null) this.hand = newHand;
+        break;
+      }
     }
   }
 

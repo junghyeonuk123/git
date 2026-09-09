@@ -14,6 +14,10 @@ export type InputAction =
   | 'shoot'
   | 'crossover'
   | 'spin'
+  | 'hesitation'
+  | 'stepback'
+  | 'inAndOut'
+  | 'legsThrough'
   | 'switchPlayer'
   | 'toggleDebug';
 
@@ -28,6 +32,10 @@ const DEFAULT_BINDINGS: Record<InputAction, string[]> = {
   shoot: ['KeyF'],
   crossover: ['KeyQ'],
   spin: ['KeyR'],
+  hesitation: ['KeyC'],
+  stepback: ['KeyV'],
+  inAndOut: ['KeyX'],
+  legsThrough: ['KeyZ'],
   switchPlayer: ['Tab'],
   toggleDebug: ['F1'],
 };

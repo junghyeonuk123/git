@@ -27,8 +27,15 @@ export const DEFAULT_MOVEMENT_CONFIG: PlayerMovementConfig = {
 export class PlayerMovement {
   readonly velocity = new THREE.Vector2(0, 0); // world-space X/Z
   facingYaw = 0;
+  /** Multiplies max speed this step; dribble moves (see DribbleMoves.ts) drive this for freeze/burst beats. */
+  speedScale = 1;
 
   constructor(private readonly config: PlayerMovementConfig = DEFAULT_MOVEMENT_CONFIG) {}
+
+  /** Adds directly to current velocity - a one-shot juke/dash impulse, not a per-frame force. */
+  applyImpulse(delta: THREE.Vector2): void {
+    this.velocity.add(delta);
+  }
 
   /**
    * @param inputAxis normalized {x: strafe, y: forward} in [-1,1]
@@ -45,7 +52,7 @@ export class PlayerMovement {
    */
   step(inputAxis: { x: number; y: number }, sprint: boolean, dt: number): THREE.Vector2 {
     const hasInput = inputAxis.x !== 0 || inputAxis.y !== 0;
-    const maxSpeed = sprint ? this.config.sprintSpeed : this.config.walkSpeed;
+    const maxSpeed = (sprint ? this.config.sprintSpeed : this.config.walkSpeed) * this.speedScale;
 
     let targetVx = 0;
     let targetVz = 0;
