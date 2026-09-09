@@ -4,15 +4,16 @@ import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 const FT = 0.3048;
 
 /** Half-extent of the playable floor including its apron, in each axis. */
-const FLOOR_HALF_X = CD.length / 2 + CD.apron;
-const FLOOR_HALF_Z = CD.width / 2 + CD.apron;
+export const FLOOR_HALF_X = CD.length / 2 + CD.apron;
+export const FLOOR_HALF_Z = CD.width / 2 + CD.apron;
 
-const WALKWAY = 2.5; // concourse gap between the floor's edge and the first row
-const ROW_COUNT = 7;
-const ROW_DEPTH = 1.05;
-const ROW_HEIGHT = 0.5;
-const ARENA_HALF_X = FLOOR_HALF_X + 6;
-const ARENA_HALF_Z = FLOOR_HALF_Z + 6;
+/** Stand layout, exported so Crowd.ts can seat spectators on the exact same rows. */
+export const WALKWAY = 2.5; // concourse gap between the floor's edge and the first row
+export const ROW_COUNT = 7;
+export const ROW_DEPTH = 1.05;
+export const ROW_HEIGHT = 0.5;
+export const ARENA_HALF_X = FLOOR_HALF_X + 6;
+export const ARENA_HALF_Z = FLOOR_HALF_Z + 6;
 const WALL_HEIGHT = 6;
 
 function buildSeatRowTexture(): THREE.CanvasTexture {

@@ -5,6 +5,7 @@ import { PhysicsWorld } from '@/physics/PhysicsWorld';
 import { Court } from '@/basketball/Court';
 import { Hoop } from '@/basketball/Hoop';
 import { Arena } from '@/environment/Arena';
+import { Crowd } from '@/environment/Crowd';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
@@ -59,6 +60,7 @@ export class Game {
   private playerController!: PlayerController;
   private ball!: Ball;
   private hoops: Hoop[] = [];
+  private crowd!: Crowd;
   private loop!: GameLoop;
 
   private readonly rules = new BasketballRules();
@@ -66,6 +68,8 @@ export class Game {
   private readonly gameClock = new GameClock();
   private readonly shotMeter = new ShotMeter();
   private lastSeenShotResult: ShotResult | null = null;
+  private lastSeenRuleEventAt = -1;
+  private elapsedTime = 0;
 
   private looseBallTimer = 0;
   private readonly GRAVITY_MAGNITUDE = 9.81;
@@ -105,6 +109,7 @@ export class Game {
 
     onProgress(0.6, 'Building arena…');
     new Arena(this.scene);
+    this.crowd = new Crowd(this.scene);
 
     onProgress(0.7, 'Spawning players…');
     this.cameraController = new CameraController(window.innerWidth / window.innerHeight);
@@ -204,6 +209,10 @@ export class Game {
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
     }
     this.rules.update(dt, this.ball.position, this.playerController.hasBall);
+    if (this.rules.lastEvent?.kind === 'score' && this.rules.lastEvent.at !== this.lastSeenRuleEventAt) {
+      this.lastSeenRuleEventAt = this.rules.lastEvent.at;
+      this.crowd.triggerCheer();
+    }
 
     this.updateLooseBallRecovery(dt);
   };
@@ -262,6 +271,8 @@ export class Game {
   }
 
   private readonly update = (dt: number, _alpha: number): void => {
+    this.elapsedTime += dt;
+    this.crowd.update(dt, this.elapsedTime);
     this.player.syncFromPhysics();
     this.player.updateWalkCycle(
       this.playerController.movement.speed,
