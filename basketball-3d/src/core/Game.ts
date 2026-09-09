@@ -79,6 +79,8 @@ export class Game {
   private readonly playerLight = new THREE.PointLight(0xfff2df, 9, 7, 2);
 
   private debugEnabled = false;
+  /** Spec section 41: a dedicated dribble-physics debug block, independent of the main F1 panel. */
+  private dribbleDebugEnabled = false;
   private readonly debugPanel = document.getElementById('debug-panel') as HTMLDivElement;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -131,6 +133,7 @@ export class Game {
     onProgress(0.95, 'Warming up…');
     this.input.rebind('toggleDebug', ['F1']);
     window.addEventListener('keydown', this.onDebugToggle);
+    window.addEventListener('keydown', this.onDribbleDebugToggle);
 
     this.loop = new GameLoop({
       fixedUpdate: this.fixedUpdate,
@@ -302,7 +305,7 @@ export class Game {
     this.shotMeter.update(this.playerController.shooting);
     this.pickupIndicator.update(!this.playerController.hasBall && isRecoverable(this.player, this.ball));
 
-    if (this.debugEnabled) {
+    if (this.debugEnabled || this.dribbleDebugEnabled) {
       this.renderDebugPanel(dt);
     }
 
@@ -314,39 +317,77 @@ export class Game {
   };
 
   private renderDebugPanel(dt: number): void {
-    const fps = dt > 0 ? 1 / dt : 0;
-    const v = this.ball.linearVelocity;
-    const bp = this.ball.position;
-    const p = this.player.position;
-    this.debugPanel.textContent = [
-      `fps: ${fps.toFixed(0)}`,
-      `physicsDt: ${this.physics.world.timestep.toFixed(4)}`,
-      `playerPos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`,
-      `grounded: ${this.player.isGrounded}`,
-      `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
-      `ballVel: ${v.length().toFixed(2)}`,
-      `hasBall: ${this.playerController.hasBall}`,
-      `ballMotion: ${classifyBallMotion(this.ball)}  distToBall: ${p.distanceTo(bp).toFixed(2)}  recovering: ${this.playerController.looseBallRecovery.isRecovering}`,
-      `speed: ${this.playerController.movement.speed.toFixed(2)}  sprintActive: ${this.playerController.dribbleSprintActive}`,
-      `playerState: ${this.playerController.stateMachine.current} (${this.playerController.stateMachine.timeInState.toFixed(2)}s)`,
-      `ballOwnership: ${this.playerController.ballOwnership.current} (owner: ${this.playerController.ballOwnership.owner})`,
-      `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,
-      `shotState: ${this.playerController.shooting.state}`,
-      `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
-      `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}`,
-      `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
-      `shotClock: ${this.rules.shotClock.toFixed(1)}`,
-      `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,
-      `bodies: ${this.physics.world.bodies.len()}`,
-      `colliders: ${this.physics.world.colliders.len()}`,
-    ].join('\n');
+    const lines: string[] = [];
+
+    if (this.debugEnabled) {
+      const fps = dt > 0 ? 1 / dt : 0;
+      const v = this.ball.linearVelocity;
+      const bp = this.ball.position;
+      const p = this.player.position;
+      lines.push(
+        `fps: ${fps.toFixed(0)}`,
+        `physicsDt: ${this.physics.world.timestep.toFixed(4)}`,
+        `playerPos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`,
+        `grounded: ${this.player.isGrounded}`,
+        `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
+        `ballVel: ${v.length().toFixed(2)}`,
+        `hasBall: ${this.playerController.hasBall}`,
+        `ballMotion: ${classifyBallMotion(this.ball)}  distToBall: ${p.distanceTo(bp).toFixed(2)}  recovering: ${this.playerController.looseBallRecovery.isRecovering}`,
+        `speed: ${this.playerController.movement.speed.toFixed(2)}  sprintActive: ${this.playerController.dribbleSprintActive}`,
+        `playerState: ${this.playerController.stateMachine.current} (${this.playerController.stateMachine.timeInState.toFixed(2)}s)`,
+        `ballOwnership: ${this.playerController.ballOwnership.current} (owner: ${this.playerController.ballOwnership.owner})`,
+        `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,
+        `shotState: ${this.playerController.shooting.state}`,
+        `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
+        `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}`,
+        `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
+        `shotClock: ${this.rules.shotClock.toFixed(1)}`,
+        `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,
+        `bodies: ${this.physics.world.bodies.len()}`,
+        `colliders: ${this.physics.world.colliders.len()}`,
+      );
+    }
+
+    if (this.dribbleDebugEnabled) {
+      // Dribbling-physics rework spec section 41: everything needed to
+      // confirm the ball is a real independent physical object and not
+      // reattached to the hand - velocity, angular velocity, the current
+      // hand-ball distance (should visibly swing, not sit constant), the
+      // bounce phase, and time since the last floor contact.
+      if (lines.length > 0) lines.push('--- dribble debug (F8) ---');
+      const pv = this.playerController.movement.velocity;
+      const bv = this.ball.linearVelocity;
+      const bav = this.ball.angularVelocity;
+      lines.push(
+        `hand: ${this.playerController.hand === 1 ? 'right' : 'left'}`,
+        `dribblePhase: ${this.playerController.dribble.phase}`,
+        `contactTimer: ${this.playerController.dribble.contactTimer.toFixed(3)}s`,
+        `handDistance: ${this.playerController.dribble.handDistance.toFixed(3)}m`,
+        `ballVel: ${bv.x.toFixed(2)}, ${bv.y.toFixed(2)}, ${bv.z.toFixed(2)}  (|v|=${bv.length().toFixed(2)})`,
+        `ballAngVel: ${bav.length().toFixed(2)} rad/s`,
+        `playerVel: ${pv.x.toFixed(2)}, ${pv.y.toFixed(2)}  (|v|=${this.playerController.movement.speed.toFixed(2)})`,
+        `ballAuthority: ${this.ball.isKinematic ? 'held (kinematic)' : 'physics (dynamic)'}`,
+      );
+    }
+
+    this.debugPanel.textContent = lines.join('\n');
   }
 
   private readonly onDebugToggle = (e: KeyboardEvent): void => {
     if (e.code !== 'F1') return;
     e.preventDefault();
     this.debugEnabled = !this.debugEnabled;
-    this.debugPanel.hidden = !this.debugEnabled;
+    this.debugPanel.hidden = !(this.debugEnabled || this.dribbleDebugEnabled);
+  };
+
+  private readonly onDribbleDebugToggle = (e: KeyboardEvent): void => {
+    if (e.code !== 'F8') return;
+    e.preventDefault();
+    this.dribbleDebugEnabled = !this.dribbleDebugEnabled;
+    this.debugPanel.hidden = !(this.debugEnabled || this.dribbleDebugEnabled);
+    if (!this.dribbleDebugEnabled && !this.debugEnabled) {
+      this.debugPanel.textContent = '';
+    }
   };
 
   private readonly onResize = (): void => {
