@@ -37,14 +37,33 @@ export class Backboard {
     this.mesh.receiveShadow = true;
     scene.add(this.mesh);
 
-    // shooter's-square accent, matches regulation markings
+    // shooter's-square accent, matches regulation markings (a white outline
+    // rectangle centered just above the rim, per spec section 15)
     const squareWidth = 24 * 0.0254;
     const squareHeight = 18 * 0.0254;
     const squareGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(0.005, squareHeight, squareWidth));
-    const squareMat = new THREE.LineBasicMaterial({ color: 0xff5a1f });
+    const squareMat = new THREE.LineBasicMaterial({ color: 0xf4f6fb });
     const square = new THREE.LineSegments(squareGeo, squareMat);
     square.position.set(centerX - side * (backboardThickness / 2 + 0.003), CD.hoop.rimHeight + 0.05, 0);
     scene.add(square);
+
+    // mounting hardware: small bolt-like studs around the board's frame,
+    // where a real backboard bolts to its support arm
+    const boltMaterial = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.4, metalness: 0.7 });
+    const boltGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.02, 8);
+    const boltOffsets: Array<[number, number]> = [
+      [backboardWidth / 2 - 0.15, backboardHeight / 2 - 0.15],
+      [-(backboardWidth / 2 - 0.15), backboardHeight / 2 - 0.15],
+      [backboardWidth / 2 - 0.15, -(backboardHeight / 2 - 0.15)],
+      [-(backboardWidth / 2 - 0.15), -(backboardHeight / 2 - 0.15)],
+    ];
+    for (const [dz, dy] of boltOffsets) {
+      const bolt = new THREE.Mesh(boltGeo, boltMaterial);
+      bolt.rotation.x = Math.PI / 2;
+      bolt.position.set(centerX - side * (backboardThickness / 2 + 0.01), centerY + dy, dz);
+      bolt.castShadow = true;
+      scene.add(bolt);
+    }
 
     const bodyDesc = physics.RAPIER.RigidBodyDesc.fixed().setTranslation(centerX, centerY, 0);
     const body = physics.world.createRigidBody(bodyDesc);

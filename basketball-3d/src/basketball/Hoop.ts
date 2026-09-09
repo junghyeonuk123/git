@@ -70,11 +70,26 @@ export class Hoop {
     pole.castShadow = true;
     scene.add(pole);
 
+    // safety padding wrap around the base, like a real arena stanchion pad
+    const padMaterial = new THREE.MeshStandardMaterial({ color: 0x8f1c1c, roughness: 0.85 });
+    const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 1.1, 16), padMaterial);
+    pad.position.set(poleX, 0.55, 0);
+    pad.castShadow = true;
+    scene.add(pad);
+
     const armLength = Math.abs(poleX - backboardX);
     const arm = new THREE.Mesh(new THREE.BoxGeometry(armLength, 0.12, 0.12), poleMaterial);
     arm.position.set((poleX + backboardX) / 2, poleHeight - 0.1, 0);
     arm.castShadow = true;
     scene.add(arm);
+
+    // rim-to-backboard support bracket, so the rim doesn't visually float
+    // in front of the board with nothing physically connecting them
+    const bracketLength = rimDistanceFromBackboard;
+    const bracket = new THREE.Mesh(new THREE.BoxGeometry(bracketLength, 0.05, 0.14), poleMaterial);
+    bracket.position.set((backboardX + rimX) / 2, rimHeight + 0.03, 0);
+    bracket.castShadow = true;
+    scene.add(bracket);
 
     this.backboard = new Backboard(scene, physics, side);
     this.net = new Net(scene, this.rimCenter);

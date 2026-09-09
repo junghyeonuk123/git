@@ -1,8 +1,11 @@
 import * as THREE from 'three';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { CourtDimensions as CD } from './CourtDimensions';
 
-const STRAND_COUNT = 10;
-const RING_COUNT = 6;
+const STRAND_COUNT = 12;
+const RING_COUNT = 7;
 const STRIDE = RING_COUNT + 1;
 const GRAVITY = -9.81;
 const DAMPING = 0.98;
@@ -12,7 +15,7 @@ const BALL_PUSH_STRENGTH = 0.9;
 
 /**
  * A small Verlet/PBD cloth (spec section 7): the net is not a static
- * decoration, it's ~70 simulated points that gravity, distance
+ * decoration, it's ~100 simulated points that gravity, distance
  * constraints, and the ball's own motion push around every physics
  * step. Deliberately low-resolution and using only nearest-neighbor
  * distance constraints (no full cloth solver) - a basketball net just
@@ -20,6 +23,13 @@ const BALL_PUSH_STRENGTH = 0.9;
  * simulation, and this keeps the per-step cost trivial (spec section
  * 27: physics detail should scale with gameplay importance, and the
  * net is explicitly "medium" priority next to the ball/rim/backboard).
+ *
+ * Rendered with LineSegments2/LineMaterial (three's built-in fat-line
+ * module) rather than plain LineSegments/LineBasicMaterial: WebGL
+ * ignores a regular Line's `linewidth` on effectively every platform, so
+ * the old net always rendered as razor-thin 1px threads no matter how
+ * the material was configured - which is why it barely read as a net at
+ * all. Fat lines get real screen-space pixel width instead.
  *
  * Point indices are always constructed as STRAND_COUNT*STRIDE up front
  * and only ever accessed within that fixed range, so the non-null
@@ -34,8 +44,10 @@ export class Net {
   private readonly pinned: boolean[] = [];
   private readonly verticalRest: number[] = []; // per ring index r: rest length between ring r and r+1
   private readonly ringRest: number[] = []; // per ring index r: rest length between adjacent strands at that ring
-  private readonly geometry: THREE.BufferGeometry;
-  private readonly positionAttr: THREE.BufferAttribute;
+  private readonly segmentIndices: number[] = []; // flattened index pairs, one per rendered line segment
+  private readonly segmentPositions: Float32Array;
+  private readonly geometry: LineSegmentsGeometry;
+  private readonly material: LineMaterial;
 
   constructor(scene: THREE.Scene, center: THREE.Vector3) {
     this.group = new THREE.Group();
@@ -64,31 +76,39 @@ export class Net {
       this.ringRest.push(this.point(r).distanceTo(this.point(STRIDE + r)));
     }
 
-    this.geometry = new THREE.BufferGeometry();
-    const buffer = new Float32Array(this.positions.length * 3);
-    this.positionAttr = new THREE.BufferAttribute(buffer, 3);
-    this.positionAttr.setUsage(THREE.DynamicDrawUsage);
-    this.geometry.setAttribute('position', this.positionAttr);
-
-    const indices: number[] = [];
     for (let i = 0; i < STRAND_COUNT; i++) {
       for (let r = 0; r < RING_COUNT; r++) {
-        indices.push(i * STRIDE + r, i * STRIDE + r + 1);
+        this.segmentIndices.push(i * STRIDE + r, i * STRIDE + r + 1);
       }
     }
     for (let r = 1; r < RING_COUNT; r++) {
       for (let i = 0; i < STRAND_COUNT; i++) {
-        indices.push(i * STRIDE + r, ((i + 1) % STRAND_COUNT) * STRIDE + r);
+        this.segmentIndices.push(i * STRIDE + r, ((i + 1) % STRAND_COUNT) * STRIDE + r);
       }
     }
-    this.geometry.setIndex(indices);
 
-    const material = new THREE.LineBasicMaterial({ color: 0xf2f2f2, transparent: true, opacity: 0.9 });
-    const lines = new THREE.LineSegments(this.geometry, material);
+    this.segmentPositions = new Float32Array((this.segmentIndices.length / 2) * 6);
+    this.geometry = new LineSegmentsGeometry();
+    this.material = new LineMaterial({
+      color: 0xf4f1e8,
+      linewidth: 1.6, // screen-space pixels
+      transparent: true,
+      opacity: 0.95,
+      worldUnits: false,
+    });
+    this.material.resolution.set(window.innerWidth, window.innerHeight);
+
+    const lines = new LineSegments2(this.geometry, this.material);
+    lines.frustumCulled = false; // small local geometry that moves every step - not worth per-frame bounds recompute
     this.group.add(lines);
 
     scene.add(this.group);
     this.writeToGeometry();
+  }
+
+  /** Call on window resize - fat lines need the viewport size to compute correct pixel width. */
+  setResolution(width: number, height: number): void {
+    this.material.resolution.set(width, height);
   }
 
   private point(i: number): THREE.Vector3 {
@@ -162,13 +182,18 @@ export class Net {
   }
 
   private writeToGeometry(): void {
-    const arr = this.positionAttr.array as Float32Array;
-    for (let i = 0; i < this.positions.length; i++) {
-      const p = this.point(i);
-      arr[i * 3] = p.x;
-      arr[i * 3 + 1] = p.y;
-      arr[i * 3 + 2] = p.z;
+    const arr = this.segmentPositions;
+    for (let s = 0; s < this.segmentIndices.length / 2; s++) {
+      const a = this.point(this.segmentIndices[s * 2]!);
+      const b = this.point(this.segmentIndices[s * 2 + 1]!);
+      const o = s * 6;
+      arr[o] = a.x;
+      arr[o + 1] = a.y;
+      arr[o + 2] = a.z;
+      arr[o + 3] = b.x;
+      arr[o + 4] = b.y;
+      arr[o + 5] = b.z;
     }
-    this.positionAttr.needsUpdate = true;
+    this.geometry.setPositions(arr);
   }
 }

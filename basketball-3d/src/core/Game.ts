@@ -269,5 +269,10 @@ export class Game {
     const height = window.innerHeight;
     this.renderer.setSize(width, height);
     this.cameraController?.setAspect(width / height);
+    // Fat-line net rendering (see Net.ts) needs the viewport size to keep
+    // its screen-space pixel width correct after a resize.
+    for (const hoop of this.hoops) {
+      hoop.net.setResolution(width, height);
+    }
   };
 }
