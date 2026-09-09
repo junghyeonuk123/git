@@ -11,81 +11,150 @@ const GROUNDED_STICK_VELOCITY = -0.6;
 const UP = new THREE.Vector3(0, 1, 0);
 const DOWN = new THREE.Vector3(0, -1, 0);
 
+/** A two-segment limb: `upper` is the hip/shoulder pivot, `lower` (its child) is the knee/elbow pivot. */
+interface LimbChain {
+  upper: THREE.Group;
+  lower: THREE.Group;
+}
+
 interface PlayerRig {
   root: THREE.Group;
   torsoPivot: THREE.Group;
-  legs: { left: THREE.Group; right: THREE.Group };
-  arms: { left: THREE.Group; right: THREE.Group };
+  legs: { left: LimbChain; right: LimbChain };
+  arms: { left: LimbChain; right: LimbChain };
 }
 
 const HIP_HEIGHT = 0.95;
 const SHOULDER_HEIGHT = 1.55;
-const LEG_LENGTH = HIP_HEIGHT;
-const ARM_LENGTH = 0.5;
+const THIGH_LENGTH = 0.52;
+const SHIN_LENGTH = HIP_HEIGHT - THIGH_LENGTH;
+const UPPER_ARM_LENGTH = 0.27;
+const FOREARM_LENGTH = 0.23;
+const ARM_LENGTH = UPPER_ARM_LENGTH + FOREARM_LENGTH;
 
 /**
- * Builds a low-poly procedural humanoid as a set of hinge pivots (hip and
- * shoulder joints) rather than flat static meshes, so PlayerAnimation can
- * swing limbs for a walk cycle by rotating the pivots. Placeholder
- * geometry only - see spec section 3: this is deliberately isolated so a
- * later GLTF-based PlayerModel can be swapped in without PlayerController
- * or any gameplay system changing (a real skeletal rig replaces these
- * pivots one-for-one with bones).
+ * Builds a low-poly procedural humanoid as a chain of hinge pivots (hip/knee,
+ * shoulder/elbow) rather than flat single-segment limbs, so the silhouette
+ * actually reads as a basketball player - distinct thighs/shins, forearms,
+ * and hands - instead of a rigid capsule stick figure. Still placeholder
+ * geometry, not a skinned mesh (see spec section 3: isolated behind this
+ * function so a later GLTF-based PlayerModel can replace it one-for-one
+ * without PlayerController or any gameplay system changing), but every
+ * joint here is a real pivot an animation can drive.
  */
 function buildProceduralBody(jerseyColor: number): PlayerRig {
   const root = new THREE.Group();
 
-  const skin = new THREE.MeshStandardMaterial({ color: 0xd8a878, roughness: 0.8 });
-  const jersey = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.75 });
-  const shorts = new THREE.MeshStandardMaterial({ color: 0x14161f, roughness: 0.8 });
-  const shoes = new THREE.MeshStandardMaterial({ color: 0xf4f0e6, roughness: 0.6 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd8a878, roughness: 0.75 });
+  const jersey = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.7 });
+  const jerseyTrim = new THREE.MeshStandardMaterial({ color: 0xf4f6fb, roughness: 0.55 });
+  const shorts = new THREE.MeshStandardMaterial({ color: 0x14161f, roughness: 0.78 });
+  const shortsTrim = new THREE.MeshStandardMaterial({ color: jerseyColor, roughness: 0.7 });
+  const socks = new THREE.MeshStandardMaterial({ color: 0xf4f6fb, roughness: 0.72 });
+  const shoes = new THREE.MeshStandardMaterial({ color: 0x1c1e24, roughness: 0.45, metalness: 0.08 });
+  const shoeSole = new THREE.MeshStandardMaterial({ color: 0xf0ece0, roughness: 0.55 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x1a130f, roughness: 0.85 });
 
-  const makeLimb = (
-    side: -1 | 1,
-    jointHeight: number,
-    length: number,
-    radius: number,
-    material: THREE.Material,
-    foot: boolean,
-  ): THREE.Group => {
-    const pivot = new THREE.Group();
-    pivot.position.set(side * (foot ? 0.12 : 0.28), jointHeight, 0);
+  const makeLeg = (side: -1 | 1): LimbChain => {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.11, HIP_HEIGHT, 0);
 
-    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length - radius * 2, 4, 8), material);
-    mesh.position.y = -length / 2;
-    mesh.castShadow = true;
-    pivot.add(mesh);
+    const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, THIGH_LENGTH - 0.2, 4, 8), skin);
+    thigh.position.y = -THIGH_LENGTH / 2;
+    thigh.castShadow = true;
+    hip.add(thigh);
 
-    if (foot) {
-      const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.09, 0.24), shoes);
-      shoe.position.set(0, -length - 0.02, 0.03);
-      shoe.castShadow = true;
-      pivot.add(shoe);
-    }
+    const knee = new THREE.Group();
+    knee.position.y = -THIGH_LENGTH;
+    hip.add(knee);
 
-    return pivot;
+    const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, SHIN_LENGTH - 0.15, 4, 8), socks);
+    shin.position.y = -SHIN_LENGTH / 2;
+    shin.castShadow = true;
+    knee.add(shin);
+
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.26), shoes);
+    shoe.position.set(0, -SHIN_LENGTH - 0.03, 0.04);
+    shoe.castShadow = true;
+    knee.add(shoe);
+
+    const sole = new THREE.Mesh(new THREE.BoxGeometry(0.125, 0.02, 0.27), shoeSole);
+    sole.position.set(0, -SHIN_LENGTH - 0.07, 0.04);
+    knee.add(sole);
+
+    return { upper: hip, lower: knee };
   };
 
-  const legs = {
-    left: makeLimb(-1, HIP_HEIGHT, LEG_LENGTH, 0.1, shorts, true),
-    right: makeLimb(1, HIP_HEIGHT, LEG_LENGTH, 0.1, shorts, true),
+  const makeArm = (side: -1 | 1): LimbChain => {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.26, SHOULDER_HEIGHT - 0.05, 0);
+
+    const upperArm = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, UPPER_ARM_LENGTH - 0.096, 4, 8), skin);
+    upperArm.position.y = -UPPER_ARM_LENGTH / 2;
+    upperArm.castShadow = true;
+    shoulder.add(upperArm);
+
+    const elbow = new THREE.Group();
+    elbow.position.y = -UPPER_ARM_LENGTH;
+    shoulder.add(elbow);
+
+    const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, FOREARM_LENGTH - 0.084, 4, 8), skin);
+    forearm.position.y = -FOREARM_LENGTH / 2;
+    forearm.castShadow = true;
+    elbow.add(forearm);
+
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skin);
+    hand.position.y = -FOREARM_LENGTH - 0.02;
+    hand.castShadow = true;
+    elbow.add(hand);
+
+    return { upper: shoulder, lower: elbow };
   };
-  const arms = {
-    left: makeLimb(-1, SHOULDER_HEIGHT - 0.05, ARM_LENGTH, 0.055, skin, false),
-    right: makeLimb(1, SHOULDER_HEIGHT - 0.05, ARM_LENGTH, 0.055, skin, false),
-  };
-  root.add(legs.left, legs.right, arms.left, arms.right);
+
+  const legs = { left: makeLeg(-1), right: makeLeg(1) };
+  const arms = { left: makeArm(-1), right: makeArm(1) };
+  root.add(legs.left.upper, legs.right.upper, arms.left.upper, arms.right.upper);
 
   const torsoPivot = new THREE.Group();
   torsoPivot.position.set(0, (HIP_HEIGHT + SHOULDER_HEIGHT) / 2, 0);
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.21, SHOULDER_HEIGHT - HIP_HEIGHT - 0.15, 4, 8), jersey);
+
+  // The shorts stay fixed to the torso rather than swinging with the thigh -
+  // real shorts hang from the hips, they don't rotate with the leg - which
+  // reads far better than one solid leg-to-waist capsule.
+  const pelvisY = HIP_HEIGHT - torsoPivot.position.y + 0.06;
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.12, 4, 8), shorts);
+  pelvis.position.y = pelvisY;
+  pelvis.castShadow = true;
+  torsoPivot.add(pelvis);
+
+  const shortsStripe = new THREE.Mesh(new THREE.CylinderGeometry(0.196, 0.2, 0.035, 16, 1, true), shortsTrim);
+  shortsStripe.position.y = pelvisY - 0.11;
+  torsoPivot.add(shortsStripe);
+
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, SHOULDER_HEIGHT - HIP_HEIGHT - 0.28, 4, 8), jersey);
+  torso.position.y = 0.09;
   torso.castShadow = true;
   torsoPivot.add(torso);
 
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.012, 6, 16), jerseyTrim);
+  collar.position.y = SHOULDER_HEIGHT - torsoPivot.position.y - 0.03;
+  collar.rotation.x = Math.PI / 2;
+  torsoPivot.add(collar);
+
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.08, 10), skin);
+  neck.position.y = SHOULDER_HEIGHT - torsoPivot.position.y + 0.02;
+  neck.castShadow = true;
+  torsoPivot.add(neck);
+
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), skin);
-  head.position.set(0, SHOULDER_HEIGHT + 0.2 - torsoPivot.position.y, 0);
+  head.position.set(0, SHOULDER_HEIGHT + 0.22 - torsoPivot.position.y, 0);
   head.castShadow = true;
   torsoPivot.add(head);
+
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.136, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair);
+  hairCap.position.copy(head.position);
+  hairCap.castShadow = true;
+  torsoPivot.add(hairCap);
 
   root.add(torsoPivot);
 
@@ -94,17 +163,23 @@ function buildProceduralBody(jerseyColor: number): PlayerRig {
 
 /** Tunables for the procedural walk-cycle animation. */
 const WALK_STRIDE_LENGTH = 1.6; // meters of travel per full gait cycle
-const WALK_LEG_AMPLITUDE = 0.55; // radians
+const WALK_LEG_AMPLITUDE = 0.55; // radians, hip swing
+const WALK_KNEE_AMPLITUDE = 0.85; // radians, knee flex during the forward swing
 const WALK_ARM_AMPLITUDE_RATIO = 0.8;
 const WALK_BOB_AMPLITUDE = 0.025; // meters
 const WALK_RAMP_SPEED = 0.3; // m/s at which swing amplitude reaches full strength
 const IDLE_SWAY_SPEED = 0.7; // rad/s
+const ARM_ELBOW_REST_BEND = 0.3; // radians, relaxed athletic elbow bend for the non-ball arm
 
 /** Lowered athletic stance while sprint-dribbling (spec section 26 posture note). */
 const CROUCH_DROP = 0.05; // meters
-const CROUCH_KNEE_BEND = 0.3; // radians added to both legs
+const CROUCH_KNEE_BEND = 0.35; // radians added to both knees
 const CROUCH_TORSO_LEAN = 0.15; // radians of forward torso lean
 const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
+
+/** Elbow bend heuristic for pointArmAtBall - see that method for why this isn't full 2-bone IK. */
+const ELBOW_STRAIGHT = 0.1;
+const ELBOW_BENT = 2.0;
 
 export class Player {
   readonly visualRoot: THREE.Group;
@@ -194,11 +269,11 @@ export class Player {
   }
 
   /**
-   * Procedural walk cycle: swings the hip/shoulder pivots on a phase that
-   * advances with distance traveled (not raw time), so leg turnover speed
-   * naturally scales with movement speed instead of just amplitude. Call
-   * once per rendered frame - this is purely visual and never touches
-   * physics.
+   * Procedural walk cycle: swings the hip/knee and shoulder pivots on a
+   * phase that advances with distance traveled (not raw time), so leg
+   * turnover speed naturally scales with movement speed instead of just
+   * amplitude. Call once per rendered frame - this is purely visual and
+   * never touches physics.
    */
   updateWalkCycle(speed: number, dt: number, crouchTarget = 0): void {
     const crouchT = 1 - Math.exp(-CROUCH_LAMBDA * dt);
@@ -214,11 +289,23 @@ export class Player {
     }
 
     const swing = Math.sin(this.walkPhase) * WALK_LEG_AMPLITUDE * swingStrength;
-    const kneeBend = this.currentCrouch * CROUCH_KNEE_BEND;
-    this.rig.legs.left.rotation.x = swing + kneeBend;
-    this.rig.legs.right.rotation.x = -swing + kneeBend;
-    this.rig.arms.left.rotation.x = -swing * WALK_ARM_AMPLITUDE_RATIO;
-    this.rig.arms.right.rotation.x = swing * WALK_ARM_AMPLITUDE_RATIO;
+    const kneeCrouchBend = this.currentCrouch * CROUCH_KNEE_BEND;
+    // Knee flexes while its leg is swinging forward (off the ground) and
+    // straightens through the plant/stance half of the cycle - a cheap
+    // stand-in for a real gait's knee flex that reads far less robotic
+    // than rotating the whole leg as one rigid rod.
+    const leftKneeSwing = Math.max(0, Math.sin(this.walkPhase)) * WALK_KNEE_AMPLITUDE * swingStrength;
+    const rightKneeSwing = Math.max(0, -Math.sin(this.walkPhase)) * WALK_KNEE_AMPLITUDE * swingStrength;
+
+    this.rig.legs.left.upper.rotation.x = swing;
+    this.rig.legs.right.upper.rotation.x = -swing;
+    this.rig.legs.left.lower.rotation.x = leftKneeSwing + kneeCrouchBend;
+    this.rig.legs.right.lower.rotation.x = rightKneeSwing + kneeCrouchBend;
+
+    this.rig.arms.left.upper.rotation.x = -swing * WALK_ARM_AMPLITUDE_RATIO;
+    this.rig.arms.right.upper.rotation.x = swing * WALK_ARM_AMPLITUDE_RATIO;
+    this.rig.arms.left.lower.rotation.x = ARM_ELBOW_REST_BEND;
+    this.rig.arms.right.lower.rotation.x = ARM_ELBOW_REST_BEND;
 
     const bob = Math.abs(Math.sin(this.walkPhase * 2)) * WALK_BOB_AMPLITUDE * swingStrength;
     // subtle idle breathing sway so the character doesn't look frozen when standing still
@@ -230,25 +317,35 @@ export class Player {
   }
 
   /**
-   * Procedural shoulder IK (spec section 26): while dribbling, the ball
-   * must read as being in the player's hand, not floating near it. This
-   * rotates the dribbling-side arm pivot so the arm points at the ball's
-   * actual physics position every frame, overriding whatever the walk
-   * cycle set that arm to this frame. Call after updateWalkCycle.
+   * Procedural arm IK (spec section 8/26): while dribbling or gathering a
+   * shot, the ball must read as being in the player's hand, not floating
+   * near it. This rotates the dribbling-side shoulder so the whole arm
+   * points at the ball's actual position every frame, then bends the elbow
+   * by how close the ball is to the shoulder - fully bent when the ball is
+   * tucked in near the body, straightening out toward the arm's full reach.
+   * That's a cheap stand-in for real two-bone IK (which needs a pole vector
+   * to pick a bend plane and can flip/glitch at extreme angles); this never
+   * does, and at the distance the broadcast camera sits, reads just as
+   * well. Overrides whatever the walk cycle set that arm to this frame -
+   * call after updateWalkCycle.
    */
   pointArmAtBall(hand: 1 | -1, ballWorldPos: THREE.Vector3): void {
-    const pivot = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
+    const chain = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
     const yaw = this.facingYaw;
 
-    const localPivotPos = pivot.position.clone().applyAxisAngle(UP, yaw);
-    const worldShoulder = this.visualRoot.position.clone().add(localPivotPos);
+    const localShoulderPos = chain.upper.position.clone().applyAxisAngle(UP, yaw);
+    const worldShoulder = this.visualRoot.position.clone().add(localShoulderPos);
 
-    const dirWorld = ballWorldPos.clone().sub(worldShoulder);
-    if (dirWorld.lengthSq() < 1e-6) return;
-    dirWorld.normalize();
+    const toBall = ballWorldPos.clone().sub(worldShoulder);
+    const dist = toBall.length();
+    if (dist < 1e-6) return;
+    const dirWorld = toBall.multiplyScalar(1 / dist);
 
     const dirLocal = dirWorld.applyAxisAngle(UP, -yaw);
-    pivot.quaternion.setFromUnitVectors(DOWN, dirLocal);
+    chain.upper.quaternion.setFromUnitVectors(DOWN, dirLocal);
+
+    const reach = clamp((dist / ARM_LENGTH - 0.35) / 0.65, 0, 1);
+    chain.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_BENT, ELBOW_STRAIGHT, reach);
   }
 
   /** Copy the physics transform onto the render group. Call after each physics step. */
