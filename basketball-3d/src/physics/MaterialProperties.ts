@@ -13,6 +13,8 @@ export const PhysicsMaterials = {
   backboard: { restitution: 0.55, friction: 0.3 } satisfies PhysicsMaterial,
   rim: { restitution: 0.5, friction: 0.35 } satisfies PhysicsMaterial,
   player: { restitution: 0.05, friction: 0.4 } satisfies PhysicsMaterial,
+  /** The basket's support pole - a padded metal stanchion, duller than the backboard glass. */
+  structure: { restitution: 0.3, friction: 0.6 } satisfies PhysicsMaterial,
 } as const;
 
 /**

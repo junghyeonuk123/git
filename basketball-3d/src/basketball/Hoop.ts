@@ -61,7 +61,7 @@ export class Hoop {
       .setCollisionGroups(interactionGroups(CollisionGroup.Rim, CollisionGroup.Ball));
     physics.world.createCollider(rimColliderDesc, rimBody);
 
-    // --- support structure (cosmetic only for now)
+    // --- support structure
     const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.5, metalness: 0.6 });
     const poleX = backboardX + side * poleSetback; // further from center court than the backboard, i.e. behind it
     const poleHeight = rimHeight + 0.9;
@@ -69,6 +69,22 @@ export class Hoop {
     pole.position.set(poleX, poleHeight / 2, 0);
     pole.castShadow = true;
     scene.add(pole);
+
+    // Real collider (rules spec section: "the back of the backboard and
+    // the area directly behind it are out-of-bounds") - without this, the
+    // backboard's plain box collider treated its back face as an equally
+    // legal bounce surface, and nothing physically stopped the ball from
+    // reaching the illegal space behind the board in the first place.
+    // Blocking that space with the support pole's own collider is simpler
+    // and more robust than special-casing an out-of-bounds check for one
+    // face of one collider: the ball now just can't get back there.
+    const poleBodyDesc = physics.RAPIER.RigidBodyDesc.fixed().setTranslation(poleX, poleHeight / 2, 0);
+    const poleBody = physics.world.createRigidBody(poleBodyDesc);
+    const poleColliderDesc = physics.RAPIER.ColliderDesc.cylinder(poleHeight / 2, 0.12)
+      .setRestitution(PhysicsMaterials.structure.restitution)
+      .setFriction(PhysicsMaterials.structure.friction)
+      .setCollisionGroups(interactionGroups(CollisionGroup.Backboard, CollisionGroup.Ball));
+    physics.world.createCollider(poleColliderDesc, poleBody);
 
     // safety padding wrap around the base, like a real arena stanchion pad
     const padMaterial = new THREE.MeshStandardMaterial({ color: 0x8f1c1c, roughness: 0.85 });
