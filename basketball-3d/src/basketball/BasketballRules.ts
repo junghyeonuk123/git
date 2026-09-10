@@ -98,7 +98,13 @@ export class BasketballRules {
   }
 
   /** Call once per fixed physics step. */
-  update(dt: number, ballPosition: THREE.Vector3, hasBall: boolean): void {
+  update(
+    dt: number,
+    ballPosition: THREE.Vector3,
+    playerPosition: THREE.Vector3,
+    hasBall: boolean,
+    isShooting: boolean,
+  ): void {
     this.turnoverRequested = false;
     if (!this.running) return;
     this.elapsed += dt;
@@ -111,8 +117,8 @@ export class BasketballRules {
 
     this.updateClock(dt);
     if (RuleConfig.shotClock) this.updateShotClock(dt, hasBall);
-    if (RuleConfig.threeSecondViolation) this.updatePaintViolation(dt, ballPosition, hasBall);
-    if (RuleConfig.outOfBounds) this.checkOutOfBounds(ballPosition);
+    if (RuleConfig.threeSecondViolation) this.updatePaintViolation(dt, ballPosition, hasBall, isShooting);
+    if (RuleConfig.outOfBounds) this.checkOutOfBounds(ballPosition, playerPosition, hasBall);
     if (RuleConfig.scoring) this.checkScoring(ballPosition);
   }
 
@@ -158,7 +164,15 @@ export class BasketballRules {
     }
   }
 
-  private updatePaintViolation(dt: number, ballPosition: THREE.Vector3, hasBall: boolean): void {
+  private updatePaintViolation(dt: number, ballPosition: THREE.Vector3, hasBall: boolean, isShooting: boolean): void {
+    // Rule 10-Section VI-2: "the 3-second count is discontinued while
+    // [the shooter's] continuous motion is toward the basket... if that
+    // continuous motion ceases, the previous 3-second count is
+    // continued" - paused, not reset, while charging a shot in the
+    // paint. This project's shot has no separate release-in-flight state
+    // to also pause for (release is instantaneous), so charging is the
+    // whole window that needs it.
+    if (isShooting) return;
     const inPaint = hasBall && isInAnyPaint(ballPosition);
     this.paintClock = inPaint ? this.paintClock + dt : 0;
     if (this.paintClock > PAINT_VIOLATION_SECONDS) {
@@ -167,15 +181,25 @@ export class BasketballRules {
     }
   }
 
-  private checkOutOfBounds(ballPosition: THREE.Vector3): void {
+  private checkOutOfBounds(ballPosition: THREE.Vector3, playerPosition: THREE.Vector3, hasBall: boolean): void {
     const margin = 0.05;
-    const outOfBounds =
-      Math.abs(ballPosition.x) > CD.length / 2 + margin || Math.abs(ballPosition.z) > CD.width / 2 + margin;
+    const isOutOfBoundsXZ = (p: THREE.Vector3): boolean =>
+      Math.abs(p.x) > CD.length / 2 + margin || Math.abs(p.z) > CD.width / 2 + margin;
+
     // Only a ball that has actually come down near the floor out there
     // counts - a three-point arc legitimately passes over the sideline
     // area while still high in the air.
-    if (outOfBounds && ballPosition.y < 0.5) {
+    if (isOutOfBoundsXZ(ballPosition) && ballPosition.y < 0.5) {
       this.callViolation('outOfBounds', 'Out of bounds');
+      return;
+    }
+
+    // Rule 10-Section XV: the ball handler themself stepping out of
+    // bounds is a turnover independent of where the ball is - it's still
+    // in their hand the whole time, so it would never trip the ball-only
+    // check above on its own.
+    if (hasBall && isOutOfBoundsXZ(playerPosition)) {
+      this.callViolation('outOfBounds', 'Player out of bounds');
     }
   }
 

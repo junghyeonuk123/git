@@ -217,7 +217,13 @@ export class Game {
       this.lastSeenShotResult = this.playerController.lastShotResult;
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
     }
-    this.rules.update(dt, this.ball.position, this.playerController.hasBall);
+    this.rules.update(
+      dt,
+      this.ball.position,
+      this.player.position,
+      this.playerController.hasBall,
+      this.playerController.shooting.state !== 'idle',
+    );
     if (this.rules.lastEvent?.kind === 'score' && this.rules.lastEvent.at !== this.lastSeenRuleEventAt) {
       this.lastSeenRuleEventAt = this.rules.lastEvent.at;
       this.crowd.triggerCheer();
