@@ -9,6 +9,8 @@ import { clamp } from '@/utils/MathUtils';
 const GRAVITY = -9.81;
 const GROUNDED_STICK_VELOCITY = -0.6;
 const UP = new THREE.Vector3(0, 1, 0);
+/** Scratch target for updateDribbleArm - avoids allocating a Vector3 every frame. */
+const HAND_TARGET = new THREE.Vector3();
 const DOWN = new THREE.Vector3(0, -1, 0);
 
 /** A two-segment limb: `upper` is the hip/shoulder pivot, `lower` (its child) is the knee/elbow pivot. */
@@ -230,6 +232,19 @@ const CROUCH_HIP_BEND = 0.55; // radians the thigh pitches FORWARD (applied nega
 const CROUCH_TORSO_LEAN = 0.28; // radians of forward torso lean
 const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
 
+/**
+ * Dribble push-down tunables. A dribbler does not follow the ball all
+ * the way to the floor with their hand - they push it down, stop around
+ * thigh height, and meet it again on the way back up. Tracking the ball
+ * the whole way (which is what pointArmAtBall does on its own) left the
+ * arm hanging straight down at the court every bounce, so the ball read
+ * as being escorted to the floor rather than bounced off it.
+ */
+const DRIBBLE_HAND_FLOOR = 0.58; // meters above the court the pushing hand bottoms out at
+const DRIBBLE_HAND_TOP = 0.85; // ball height the hand is considered fully "up" at, for the pump blend
+const DRIBBLE_PUMP_RISE = 0.035; // meters the body extends upward as the ball comes back up
+const DRIBBLE_PUMP_LEAN = 0.09; // radians of extra torso lean at the bottom of the push
+
 /** Elbow bend heuristic for pointArmAtBall - see that method for why this isn't full 2-bone IK. */
 const ELBOW_STRAIGHT = 0.1;
 const ELBOW_BENT = 2.0;
@@ -259,7 +274,7 @@ const SHOT_DIP_END = 0.25;
  * like and what stops an over-held shot from hovering at the apex.
  */
 const SHOT_RISE_END = 0.6;
-const SHOT_JUMP_HEIGHT = 0.17; // meters off the floor at the top of the drive - a jump shot, not a dunk approach
+const SHOT_JUMP_HEIGHT = 0.13; // meters off the floor at the top of the drive - a jump shot, not a dunk approach
 const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
 const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
 const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
@@ -313,7 +328,15 @@ export class Player {
     this.characterController.setUp({ x: 0, y: 1, z: 0 });
     this.characterController.setMaxSlopeClimbAngle((45 * Math.PI) / 180);
     this.characterController.setMinSlopeSlideAngle((35 * Math.PI) / 180);
-    this.characterController.enableAutostep(0.25, 0.15, true);
+    // Autostep is for climbing a step or a curb - a basketball court is
+    // dead flat, so there is nothing here worth stepping onto. Left at
+    // its old 25cm/dynamic-bodies-included setting it did the one thing
+    // it could still find to climb: the other player. Pulling up over a
+    // defender popped the shooter's capsule ~11cm straight up the instant
+    // the two capsules touched, which is what made a contested jumper
+    // look like it was released from mid-air by someone levitating. Kept
+    // just large enough to absorb collider seams.
+    this.characterController.enableAutostep(0.05, 0.05, false);
     this.characterController.enableSnapToGround(0.25);
   }
 
@@ -469,6 +492,35 @@ export class Player {
   }
 
   /**
+   * The dribbling arm specifically: pointArmAtBall, but with the hand
+   * stopped at DRIBBLE_HAND_FLOOR instead of chasing the ball down to
+   * the court, plus a small body pump synced to the bounce.
+   *
+   * The pump matters more than it sounds. The broadcast camera sits high
+   * and behind, an angle from which fore/aft limb rotation is almost
+   * invisible and only vertical body movement really reads - so a
+   * dribble with no vertical component to it looks like the player is
+   * gliding along beside a ball that happens to be bouncing. Extending
+   * up as the ball rises and settling as the hand drives it back down
+   * is what makes the two look connected.
+   *
+   * Call after updateWalkCycle, same as pointArmAtBall.
+   */
+  updateDribbleArm(hand: 1 | -1, ballWorldPos: THREE.Vector3): void {
+    const ground = this.groundY;
+    const handY = Math.max(ballWorldPos.y, ground + DRIBBLE_HAND_FLOOR);
+    HAND_TARGET.set(ballWorldPos.x, handY, ballWorldPos.z);
+    this.pointArmAtBall(hand, HAND_TARGET);
+
+    // 0 with the ball up at the top of the bounce, 1 at full push-down.
+    const push = 1 - clamp((handY - ground - DRIBBLE_HAND_FLOOR) / (DRIBBLE_HAND_TOP - DRIBBLE_HAND_FLOOR), 0, 1);
+    // Rise on the way up rather than sinking on the way down, so the
+    // shoes never get pushed through the court on the push-down half.
+    this.visualRoot.position.y += (1 - push) * DRIBBLE_PUMP_RISE;
+    this.rig.torsoPivot.rotation.x += push * DRIBBLE_PUMP_LEAN;
+  }
+
+  /**
    * The windup half of a jump shot: sinking into a loaded stance as the
    * shot charges. `t` is charge progress, 0..1. Call after
    * updateWalkCycle (it deepens whatever stance that produced) and
@@ -604,8 +656,13 @@ export class Player {
    * World-space point near the player's hand, for ball attachment.
    * `heightAboveGround` picks the anchor: dribbling sits around the
    * waist, a shot's gather/set-point sits around the chest.
+   *
+   * `side` is +1 for the right hand and -1 for the left, but takes any
+   * value in between: a two-handed shot pocket sits partway toward the
+   * centerline rather than out at one hand (see ShootingSystem's
+   * GATHER_CENTERING), and 0 is dead center in front of the chest.
    */
-  getHandPosition(out: THREE.Vector3, side: 1 | -1, heightAboveGround: number): THREE.Vector3 {
+  getHandPosition(out: THREE.Vector3, side: number, heightAboveGround: number): THREE.Vector3 {
     const p = this.position;
     const yaw = this.facingYaw;
     const localOffset = new THREE.Vector3(side * 0.32, 0, 0.22);

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Player } from './Player';
+import { shotChargeLift, type Player } from './Player';
 import type { Ball } from '@/basketball/Ball';
 import type { Hoop } from '@/basketball/Hoop';
 import { solveLaunch, shotAngleForDistance } from '@/utils/Ballistics';
@@ -22,11 +22,33 @@ export const ZONE_BANK_MAX = 0.8;
 // gather height over the charge gets a real winding-up arm motion for
 // free, with no separate shooting-pose animation system needed.
 const GATHER_HEIGHT_LOW = 1.0; // catch pocket, roughly hip/chest height
-const GATHER_HEIGHT_HIGH = 1.82; // release point, just above SHOULDER_HEIGHT (1.55) - a real set point sits above the head, not at the chest
+const GATHER_HEIGHT_HIGH = 1.62; // set point, just above SHOULDER_HEIGHT (1.55) - forehead height, which is where a real jumper releases
 // Windup finishes right around the swish window's release timing, not at
 // METER_CAP - holding past the sweet spot (bank/strong) keeps the ball
 // at full extension rather than continuing to rise indefinitely.
 const WINDUP_METER = ZONE_SWISH_MAX;
+
+/**
+ * Meter progress over which the ball is scooped up out of the dribble
+ * into the shot pocket. Without this the ball TELEPORTED from wherever
+ * the dribble had it (often down near the floor mid-bounce) straight up
+ * to GATHER_HEIGHT_LOW on the frame the button went down, so pressing
+ * shoot while dribbling had no gather at all - the ball simply appeared
+ * at the chest. Short on purpose: a real gather is fast, it just isn't
+ * instantaneous.
+ */
+const SCOOP_METER = 0.13;
+
+/**
+ * How far the ball slides in from the dribbling hand toward the body's
+ * centerline as the shot winds up. A jump shot is taken with two hands
+ * on the ball, and Game.ts already points BOTH arms at it while
+ * charging - but with the anchor left at the full dribbling-hand offset
+ * the guide arm had to reach across the chest to get there, which read
+ * as an awkward grab rather than a gather. 1 would be dead center; a
+ * real set point stays slightly to the shooting side.
+ */
+const GATHER_CENTERING = 0.75;
 const FILL_RATE = 1.0; // meter units per second
 const BACKSPIN = 26; // rad/s, purely visual - see Ball seam rendering
 
@@ -127,6 +149,8 @@ export function classifyMeter(meter: number): ShotZone {
 export class ShootingSystem {
   state: 'idle' | 'charging' = 'idle';
   meter = 0;
+  /** Ball height above the court the frame the gather started, so the scoop begins from where the ball really was. */
+  private gatherFromY = GATHER_HEIGHT_LOW;
 
   constructor(
     private readonly player: Player,
@@ -139,6 +163,11 @@ export class ShootingSystem {
     if (this.state !== 'idle') return;
     this.state = 'charging';
     this.meter = 0;
+    this.gatherFromY = THREE.MathUtils.clamp(
+      this.ball.position.y - this.player.groundY,
+      CD.ball.radius,
+      GATHER_HEIGHT_LOW,
+    );
   }
 
   /** Call once per fixed physics step while charging - holds the ball in a rising gather-to-release pose. */
@@ -147,9 +176,23 @@ export class ShootingSystem {
     this.meter = Math.min(METER_CAP, this.meter + FILL_RATE * dt);
 
     const windupT = Math.min(1, this.meter / WINDUP_METER);
-    const gatherHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, GATHER_HEIGHT_HIGH, windupT);
+    const scoopT = Math.min(1, this.meter / SCOOP_METER);
+    const setHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, GATHER_HEIGHT_HIGH, windupT);
+    // Scoop up out of the dribble first, then ride the windup.
+    const pocketHeight = THREE.MathUtils.lerp(this.gatherFromY, setHeight, scoopT * scoopT * (3 - 2 * scoopT));
+
+    // The ball rides the shooter's body up and back down with the jump
+    // instead of being pinned to a height measured off the floor. That
+    // pinning is what made a long hold look like levitation: past the
+    // top of the windup the ball simply parked above the player's head
+    // and hung there, motionless, while the body came back down out from
+    // under it - so the shot appeared to be released from way up high by
+    // someone floating. Adding the same lift the legs are producing
+    // keeps ball and hands as one unit for the whole motion.
+    const gatherHeight = pocketHeight + shotChargeLift(this.meter / METER_CAP);
+
     const gatherPos = new THREE.Vector3();
-    this.player.getHandPosition(gatherPos, hand, gatherHeight);
+    this.player.getHandPosition(gatherPos, hand * (1 - GATHER_CENTERING * windupT), gatherHeight);
     this.ball.setKinematicHeld(gatherPos);
   }
 

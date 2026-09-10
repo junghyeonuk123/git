@@ -355,8 +355,10 @@ export class Game {
       } else {
         // visually plants the dribbling hand on the ball instead of letting
         // it read as a separate object bouncing near the player (spec
-        // section 26: ball/hand IK)
-        this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
+        // section 26: ball/hand IK), and pumps the body with the bounce
+        // so the player is visibly pushing the ball down rather than
+        // walking alongside it.
+        this.player.updateDribbleArm(this.playerController.hand, this.ball.position);
       }
     } else if (this.shotAirTimer > 0) {
       this.shotAirTimer = Math.max(0, this.shotAirTimer - dt);
@@ -397,7 +399,7 @@ export class Game {
         `fps: ${fps.toFixed(0)}`,
         `physicsDt: ${this.physics.world.timestep.toFixed(4)}`,
         `playerPos: ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`,
-        `grounded: ${this.player.isGrounded}`,
+        `grounded: ${this.player.isGrounded}  facingYaw: ${this.player.facingYaw.toFixed(2)}`,
         `ballPos: ${bp.x.toFixed(2)}, ${bp.y.toFixed(2)}, ${bp.z.toFixed(2)}`,
         `ballVel: ${v.length().toFixed(2)}`,
         `hasBall: ${this.playerController.hasBall}`,

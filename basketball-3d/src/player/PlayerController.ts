@@ -3,16 +3,19 @@ import type { InputManager } from '@/core/InputManager';
 import type { Ball } from '@/basketball/Ball';
 import type { Hoop } from '@/basketball/Hoop';
 import type { Player } from './Player';
-import { PlayerMovement } from './PlayerMovement';
+import { PlayerMovement, dampAngle } from './PlayerMovement';
 import { DribbleSystem, DRIBBLE_HEIGHT_HIGH, DRIBBLE_HEIGHT_LOW, DRIBBLE_HEIGHT_NORMAL } from './DribbleSystem';
 import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
-import { ShootingSystem, type ShotResult } from './ShootingSystem';
+import { ShootingSystem, nearestHoop, type ShotResult } from './ShootingSystem';
 import { PassingSystem } from './PassingSystem';
 import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
 import { BallOwnershipTracker } from '@/basketball/BallOwnership';
 import { LooseBallRecoverySystem } from '@/basketball/LooseBallRecovery';
 
 const MOVE_ACTIONS: DribbleMoveType[] = ['crossover', 'hesitation', 'stepback', 'inAndOut', 'legsThrough'];
+
+/** How hard the shooter turns to face the rim during a gather - brisk enough to finish a 90-degree turn well inside a normal hold, slow enough to read as a turn rather than a snap. */
+const SQUARE_UP_LAMBDA = 9;
 
 /**
  * Translates raw input + camera orientation into calls on Player/Movement,
@@ -69,16 +72,48 @@ export class PlayerController {
     // Feeding it live input here was letting the player sprint freely for
     // the whole hold, which read as a canned "gather" that never actually
     // stopped moving - as if the two systems were fighting each other.
-    const moveAxis = this.shooting.state === 'charging' ? { x: 0, y: 0 } : this.input.moveAxis;
+    const charging = this.shooting.state === 'charging';
+    const moveAxis = charging ? { x: 0, y: 0 } : this.input.moveAxis;
     const displacement = this.movement.step(moveAxis, sprint, dt);
     this.player.applyMovement(displacement, dt);
 
-    if (this.movement.speed > 0.05) {
+    // Squaring up has to happen BEFORE handlePossession, because the
+    // gather anchor ShootingSystem writes the ball to is derived from
+    // the player's facing (Player.getHandPosition) - turn afterwards and
+    // the ball would sit a frame behind the body it's supposed to be
+    // held by, which reads as the ball swinging around the player.
+    if (charging) {
+      this.squareUpToRim(hoops, dt);
+    } else if (this.movement.speed > 0.05) {
       this.player.setFacing(this.movement.facingYaw);
     }
 
     this.handlePossession(dt, hoops, sprint, defenderPosition);
     this.stateMachine.update(dt);
+  }
+
+  /**
+   * Nobody shoots over their own shoulder: a real shooter turns and
+   * squares their chest to the rim as part of the gather. Previously the
+   * player kept whatever facing their last movement input left them
+   * with, so cutting away from the basket and pulling up fired the ball
+   * off backwards while the character faced the other way entirely.
+   *
+   * Damped rather than snapped, and the turn is written back into
+   * PlayerMovement too, so releasing the shot doesn't rubber-band the
+   * body back to its pre-gather facing on the next movement step.
+   */
+  private squareUpToRim(hoops: readonly Hoop[], dt: number): void {
+    const from = this.player.position;
+    const rim = nearestHoop(hoops, from).rimCenter;
+    const dx = rim.x - from.x;
+    const dz = rim.z - from.z;
+    if (dx * dx + dz * dz < 1e-6) return;
+    // atan2(x, z) - not (z, x) - matches the yaw convention the rest of
+    // the project uses (see PlayerMovement.applyTarget, DefenderAI).
+    const yaw = dampAngle(this.player.facingYaw, Math.atan2(dx, dz), SQUARE_UP_LAMBDA, dt);
+    this.player.setFacing(yaw);
+    this.movement.facingYaw = yaw;
   }
 
   private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean, defenderPosition?: THREE.Vector3): void {

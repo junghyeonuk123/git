@@ -94,7 +94,8 @@ export class PlayerMovement {
   }
 }
 
-function dampAngle(current: number, target: number, lambda: number, dt: number): number {
+/** Shortest-path angular damping, shared with anything else that needs to turn a player smoothly (e.g. squaring up to the rim for a shot). */
+export function dampAngle(current: number, target: number, lambda: number, dt: number): number {
   let delta = target - current;
   delta = Math.atan2(Math.sin(delta), Math.cos(delta)); // shortest angular path
   const t = 1 - Math.exp(-lambda * dt);
