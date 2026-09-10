@@ -59,7 +59,7 @@ export class PlayerController {
    * broadcast camera never rotates - see CameraController and
    * PlayerMovement.step for the exact screen-to-world mapping).
    */
-  fixedUpdate(dt: number, hoops: readonly Hoop[]): void {
+  fixedUpdate(dt: number, hoops: readonly Hoop[], defenderPosition?: THREE.Vector3): void {
     const sprint = this.input.isDown('sprint');
     // Real gather rule: once the shot motion starts, you don't get to keep
     // cutting new directions with the stick - whatever momentum you already
@@ -77,11 +77,11 @@ export class PlayerController {
       this.player.setFacing(this.movement.facingYaw);
     }
 
-    this.handlePossession(dt, hoops, sprint);
+    this.handlePossession(dt, hoops, sprint, defenderPosition);
     this.stateMachine.update(dt);
   }
 
-  private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean): void {
+  private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean, defenderPosition?: THREE.Vector3): void {
     if (this.hasBall && this.shooting.state === 'idle' && this.input.wasPressedThisFrame('shoot')) {
       this.shooting.startCharge();
     }
@@ -90,7 +90,7 @@ export class PlayerController {
       this.dribbleSprintActive = false;
       this.shooting.fixedUpdate(dt, this.hand);
       if (this.input.wasReleasedThisFrame('shoot')) {
-        const result = this.shooting.release(hoops);
+        const result = this.shooting.release(hoops, defenderPosition);
         if (result) {
           this.lastShotResult = result;
           this.hasBall = false;

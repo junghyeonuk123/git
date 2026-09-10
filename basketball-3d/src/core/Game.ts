@@ -208,7 +208,7 @@ export class Game {
     // Movement is world-relative, not camera-relative - the broadcast
     // camera (CameraController) never rotates, so there is no camera yaw
     // to convert input against.
-    this.playerController.fixedUpdate(dt, this.hoops);
+    this.playerController.fixedUpdate(dt, this.hoops, this.defender.player.position);
     if (this.player.position.y < -2) {
       this.player.resetToGround();
     }
@@ -383,7 +383,7 @@ export class Game {
         `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,
         `shotState: ${this.playerController.shooting.state}`,
         `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
-        `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}`,
+        `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,
         `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,

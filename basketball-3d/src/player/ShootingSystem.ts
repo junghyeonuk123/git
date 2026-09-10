@@ -24,6 +24,46 @@ export interface ShotResult {
   zone: ShotZone;
   targetHoop: Hoop;
   points: 2 | 3;
+  /** 0 = wide open, 1 = fully contested. Debug/UI only - see applyContest for how it actually perturbs the shot. */
+  contestLevel: number;
+  /** Raw defender distance at release, debug only. */
+  contestDistance: number;
+}
+
+/** Beyond this defender distance, a shot is wide open. */
+const CONTEST_OPEN_DISTANCE = 1.8;
+/** At or inside this defender distance, contest is maxed out. */
+const CONTEST_TIGHT_DISTANCE = 0.8;
+/** Max left/right release deviation at full contest, radians. */
+const CONTEST_MAX_ANGLE = 0.11;
+/** Max over/under-power deviation at full contest, as a fraction of velocity magnitude. */
+const CONTEST_MAX_POWER_PCT = 0.1;
+
+function contestLevelFor(releasePos: THREE.Vector3, defenderPos: THREE.Vector3 | undefined): { level: number; distance: number } {
+  if (!defenderPos) return { level: 0, distance: Infinity };
+  const dist = releasePos.distanceTo(defenderPos);
+  const level = THREE.MathUtils.clamp(
+    1 - (dist - CONTEST_TIGHT_DISTANCE) / (CONTEST_OPEN_DISTANCE - CONTEST_TIGHT_DISTANCE),
+    0,
+    1,
+  );
+  return { level, distance: dist };
+}
+
+/**
+ * A contested release is rushed/altered, not retargeted - this perturbs
+ * the already-solved velocity (a real deviation the physics engine then
+ * plays out for real, same as everything else about this shot) rather
+ * than lowering some abstract "success chance". Section 31 of the
+ * reference material is explicit that a contest must be locked in at
+ * release and never retroactively touch the ball once it's in flight;
+ * this is called once, synchronously, before ball.release() ever runs.
+ */
+function applyContest(velocity: THREE.Vector3, contestLevel: number): THREE.Vector3 {
+  if (contestLevel <= 0) return velocity;
+  const angle = (Math.random() * 2 - 1) * CONTEST_MAX_ANGLE * contestLevel;
+  const power = 1 + (Math.random() * 2 - 1) * CONTEST_MAX_POWER_PCT * contestLevel;
+  return velocity.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).multiplyScalar(power);
 }
 
 /**
@@ -98,7 +138,7 @@ export class ShootingSystem {
   }
 
   /** Releases the shot at the nearest hoop. Returns null if not currently charging. */
-  release(hoops: readonly Hoop[]): ShotResult | null {
+  release(hoops: readonly Hoop[], defenderPosition?: THREE.Vector3): ShotResult | null {
     if (this.state !== 'charging') return null;
     this.state = 'idle';
     const meter = this.meter;
@@ -128,12 +168,15 @@ export class ShootingSystem {
       velocity = velocity.clone().multiplyScalar(factor);
     }
 
+    const contest = contestLevelFor(releasePos, defenderPosition);
+    velocity = applyContest(velocity, contest.level);
+
     const horizAxis = new THREE.Vector3(-velocity.z, 0, velocity.x).normalize();
     const angularVelocity = horizAxis.multiplyScalar(BACKSPIN);
 
     this.ball.release(velocity, angularVelocity);
     const points = pointsForRelease(releasePos, targetHoop);
-    return { velocity, angularVelocity, zone, targetHoop, points };
+    return { velocity, angularVelocity, zone, targetHoop, points, contestLevel: contest.level, contestDistance: contest.distance };
   }
 }
 
