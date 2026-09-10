@@ -5,16 +5,30 @@ import type { Hoop } from '@/basketball/Hoop';
 import { solveLaunch, shotAngleForDistance } from '@/utils/Ballistics';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 
-const GATHER_HEIGHT = 1.3; // chest/set-point height for the ball while charging
-const FILL_RATE = 1.0; // meter units per second
-const BACKSPIN = 26; // rad/s, purely visual - see Ball seam rendering
-
 // Exported so ui/ShotMeter.ts draws the exact same zone boundaries the
 // release logic below actually uses - one source of truth.
 export const METER_CAP = 1.15;
 export const ZONE_WEAK_MAX = 0.62; // also doubles as the swish window's lower bound
 export const ZONE_SWISH_MAX = 0.7;
 export const ZONE_BANK_MAX = 0.8;
+
+// A real jump shot's ball visibly rises from a low gather pocket up to a
+// release point above the head as the shooter winds up - the ball was
+// previously held at one fixed height (GATHER_HEIGHT=1.3) for the entire
+// charge, which is a real chunk of why the shot read as having "no
+// motion": the ball just sat still at chest height for over a second,
+// then teleported into flight. pointArmAtBall already aims the whole arm
+// at wherever the ball actually is every frame, so raising the ball's
+// gather height over the charge gets a real winding-up arm motion for
+// free, with no separate shooting-pose animation system needed.
+const GATHER_HEIGHT_LOW = 1.0; // catch pocket, roughly hip/chest height
+const GATHER_HEIGHT_HIGH = 1.82; // release point, just above SHOULDER_HEIGHT (1.55) - a real set point sits above the head, not at the chest
+// Windup finishes right around the swish window's release timing, not at
+// METER_CAP - holding past the sweet spot (bank/strong) keeps the ball
+// at full extension rather than continuing to rise indefinitely.
+const WINDUP_METER = ZONE_SWISH_MAX;
+const FILL_RATE = 1.0; // meter units per second
+const BACKSPIN = 26; // rad/s, purely visual - see Ball seam rendering
 
 export type ShotZone = 'weak' | 'swish' | 'bank' | 'strong';
 
@@ -127,13 +141,15 @@ export class ShootingSystem {
     this.meter = 0;
   }
 
-  /** Call once per fixed physics step while charging - holds the ball in a gather pose. */
+  /** Call once per fixed physics step while charging - holds the ball in a rising gather-to-release pose. */
   fixedUpdate(dt: number, hand: 1 | -1): void {
     if (this.state !== 'charging') return;
     this.meter = Math.min(METER_CAP, this.meter + FILL_RATE * dt);
 
+    const windupT = Math.min(1, this.meter / WINDUP_METER);
+    const gatherHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, GATHER_HEIGHT_HIGH, windupT);
     const gatherPos = new THREE.Vector3();
-    this.player.getHandPosition(gatherPos, hand, GATHER_HEIGHT);
+    this.player.getHandPosition(gatherPos, hand, gatherHeight);
     this.ball.setKinematicHeld(gatherPos);
   }
 

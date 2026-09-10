@@ -181,6 +181,15 @@ const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
 const ELBOW_STRAIGHT = 0.1;
 const ELBOW_BENT = 2.0;
 
+/** Purely visual jump-shot lift during the follow-through hold - never touches the physics capsule. */
+const FOLLOW_THROUGH_HOP_HEIGHT = 0.09;
+
+/** Defensive athletic stance (bent knees, arms spread wide) - see setGuardingPose. */
+const GUARD_KNEE_BEND = 0.65;
+const GUARD_TORSO_LEAN = 0.22;
+const GUARD_ARM_SPREAD = 1.0; // radians outward from straight down
+const GUARD_ELBOW_BEND = 1.3;
+
 export class Player {
   readonly visualRoot: THREE.Group;
   readonly body: RAPIER.RigidBody;
@@ -368,6 +377,55 @@ export class Player {
 
     const reach = clamp((dist / ARM_LENGTH - 0.35) / 0.65, 0, 1);
     chain.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_BENT, ELBOW_STRAIGHT, reach);
+  }
+
+  /**
+   * Brief follow-through hold right after a shot release. Without this,
+   * the shooting arm snapped straight back to the idle/dribble pose the
+   * instant the ball left the hand (Game.ts only calls pointArmAtBall
+   * while hasBall is true, which flips false the moment release()
+   * succeeds) - there was no shot motion to see at all, just the ball
+   * appearing at chest height, then flight. Call for a short decaying
+   * window (t: 1 = just released, 0 = window over) instead of
+   * pointArmAtBall once hasBall goes false. Also gives the release a
+   * small purely-visual lift (never touches the physics capsule, same
+   * pattern as updateWalkCycle's bob/crouch offsets) so the shot reads
+   * as a real jump shot instead of a flat-footed release.
+   */
+  holdFollowThrough(hand: 1 | -1, t: number): void {
+    const chain = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
+    // "up and slightly forward" in the arm's own local space - already
+    // relative to facing since chain.upper is a direct child of
+    // visualRoot, so no world/yaw conversion is needed here the way
+    // pointArmAtBall needs one for its world-space ball target.
+    const localDir = new THREE.Vector3(0, 1, 0.3).normalize();
+    chain.upper.quaternion.setFromUnitVectors(DOWN, localDir);
+    chain.lower.rotation.x = ELBOW_STRAIGHT;
+
+    const hop = Math.sin(clamp(t, 0, 1) * Math.PI) * FOLLOW_THROUGH_HOP_HEIGHT;
+    this.visualRoot.position.y += hop;
+  }
+
+  /**
+   * Athletic defensive stance: knees bent low, arms spread wide to the
+   * sides rather than swinging with the gait. Without this the defender
+   * used the exact same relaxed walk-cycle arm swing as the ball
+   * handler, which reads as strange since a defender is always driven
+   * by DefenderAI's own facing override (always toward the attacker,
+   * never toward its own movement direction - see that class) rather
+   * than a natural walking gait, so an ordinary arm swing on top of that
+   * looked like sliding rather than guarding. Call after updateWalkCycle.
+   */
+  setGuardingPose(): void {
+    for (const side of [-1, 1] as const) {
+      const chain = side === 1 ? this.rig.arms.right : this.rig.arms.left;
+      const localDir = new THREE.Vector3(side * GUARD_ARM_SPREAD, -1, 0.15).normalize();
+      chain.upper.quaternion.setFromUnitVectors(DOWN, localDir);
+      chain.lower.rotation.x = GUARD_ELBOW_BEND;
+    }
+    this.rig.legs.left.lower.rotation.x += GUARD_KNEE_BEND;
+    this.rig.legs.right.lower.rotation.x += GUARD_KNEE_BEND;
+    this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, GUARD_TORSO_LEAN);
   }
 
   /** Copy the physics transform onto the render group. Call after each physics step. */

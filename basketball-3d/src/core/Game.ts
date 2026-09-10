@@ -75,6 +75,10 @@ export class Game {
   private lastSeenShotResult: ShotResult | null = null;
   private lastSeenRuleEventAt = -1;
   private elapsedTime = 0;
+  /** Seconds remaining in the post-release follow-through hold - see Player.holdFollowThrough. */
+  private followThroughTimer = 0;
+  private followThroughHand: 1 | -1 = 1;
+  private static readonly FOLLOW_THROUGH_DURATION = 0.3;
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
@@ -223,6 +227,8 @@ export class Game {
     if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
       this.lastSeenShotResult = this.playerController.lastShotResult;
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
+      this.followThroughTimer = Game.FOLLOW_THROUGH_DURATION;
+      this.followThroughHand = this.playerController.hand;
     }
     this.rules.update(
       dt,
@@ -335,6 +341,9 @@ export class Game {
       // it read as a separate object bouncing near the player (spec
       // section 26: ball/hand IK)
       this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
+    } else if (this.followThroughTimer > 0) {
+      this.followThroughTimer = Math.max(0, this.followThroughTimer - dt);
+      this.player.holdFollowThrough(this.followThroughHand, this.followThroughTimer / Game.FOLLOW_THROUGH_DURATION);
     }
     const charging = this.playerController.shooting.state === 'charging';
     this.cameraController.update(this.player.position, this.ball.position, dt, {

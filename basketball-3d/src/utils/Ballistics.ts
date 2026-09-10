@@ -111,8 +111,16 @@ export function solveLaunch(
   };
 }
 
-/** Picks a shallower arc for long shots, a steeper one up close - a heuristic, not a rule. */
+/**
+ * Picks a shallower arc for long shots, a steeper one up close - a
+ * heuristic, not a rule. Previously ranged up to 62 degrees for close
+ * shots, which reads as the ball "jumping" straight up into an
+ * exaggerated moon-ball arc rather than a real jump shot's release -
+ * a real shot's arc very rarely needs to exceed about 50-52 degrees
+ * even up close, since the release point is already well above the rim
+ * plane.
+ */
 export function shotAngleForDistance(horizontalDistance: number): number {
-  const deg = 58 - horizontalDistance * 1.8;
-  return THREE.MathUtils.degToRad(THREE.MathUtils.clamp(deg, 42, 62));
+  const deg = 50 - horizontalDistance * 1.2;
+  return THREE.MathUtils.degToRad(THREE.MathUtils.clamp(deg, 42, 50));
 }

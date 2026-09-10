@@ -7,8 +7,14 @@ import { PlayerMovement } from '@/player/PlayerMovement';
 import type { PlayerController } from '@/player/PlayerController';
 import { nearestHoop } from '@/player/ShootingSystem';
 
-/** How far off the attacker's hip the defender tries to sit - roughly arm's length, between the attacker and the basket they're attacking. */
-const GUARD_DISTANCE = 1.15;
+/**
+ * How far off the attacker's hip the defender tries to sit, between the
+ * attacker and the basket they're attacking. Widened from the original
+ * 1.15m after direct feedback that the defender read as standing too
+ * close - real on-ball defense plays at something closer to a full
+ * arm's length plus a step, not chest-to-chest.
+ */
+const GUARD_DISTANCE = 1.45;
 /** Beyond this gap to its target spot, the defender sprints to close it; inside it, a walk reads as a controlled guarding shuffle rather than a dash. */
 const SPRINT_CLOSE_DISTANCE = 2.5;
 /**
@@ -159,6 +165,7 @@ export class DefenderAI {
 
   updateVisuals(dt: number): void {
     this.player.updateWalkCycle(this.movement.speed, dt, 0);
+    this.player.setGuardingPose();
   }
 
   /** Debug panel only. */
