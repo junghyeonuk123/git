@@ -210,7 +210,7 @@ export class Game {
       this.player.resetToGround();
     }
     this.physics.step();
-    this.checkRimContact();
+    this.checkBallCollisionEvents();
     this.updateNets(dt);
 
     if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
@@ -226,15 +226,31 @@ export class Game {
     this.updateLooseBallRecovery();
   };
 
-  /** Rule 7-Section IV-4-1 needs to know whether a missed shot actually touched the rim (vs. an airball, which never resets the shot clock). */
-  private checkRimContact(): void {
+  /**
+   * One drain per step for every ball collision-event consumer - the
+   * event queue's buffer is cleared as soon as it's drained once, so this
+   * has to be the single place anything reads it.
+   *
+   * Rule 7-Section IV-4-1 needs to know whether a missed shot actually
+   * touched the rim (vs. an airball, which never resets the shot clock).
+   * Rule 8-Section II-1 needs to know if the ball touched a basket's
+   * support pole, which is a dead-ball out-of-bounds rather than a legal
+   * bounce.
+   */
+  private checkBallCollisionEvents(): void {
     const ballHandle = this.ball.collider.handle;
+    const otherHandle = (h1: number, h2: number): number | null =>
+      h1 === ballHandle ? h2 : h2 === ballHandle ? h1 : null;
+
     this.physics.drainCollisionEvents((handle1, handle2, started) => {
       if (!started) return;
-      const isBallRim =
-        (handle1 === ballHandle && this.hoops.some((h) => h.rimCollider.handle === handle2)) ||
-        (handle2 === ballHandle && this.hoops.some((h) => h.rimCollider.handle === handle1));
-      if (isBallRim) this.rules.notifyRimContact();
+      const other = otherHandle(handle1, handle2);
+      if (other === null) return;
+      if (this.hoops.some((h) => h.rimCollider.handle === other)) {
+        this.rules.notifyRimContact();
+      } else if (this.hoops.some((h) => h.poleCollider.handle === other)) {
+        this.rules.notifyBasketSupportContact();
+      }
     });
   }
 

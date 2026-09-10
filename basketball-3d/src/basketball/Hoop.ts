@@ -25,6 +25,8 @@ export class Hoop {
   readonly net: Net;
   /** For shot-clock rule 7-Section IV-3-1: detecting whether a missed shot actually touched the rim. */
   readonly rimCollider: import('@dimforge/rapier3d-compat').Collider;
+  /** For rule 8-Section II-1: touching the basket's support structure is a dead-ball out-of-bounds, not a legal bounce. */
+  readonly poleCollider: import('@dimforge/rapier3d-compat').Collider;
 
   constructor(scene: THREE.Scene, physics: PhysicsWorld, side: 1 | -1) {
     const { rimRadius, rimTubeRadius, rimHeight, rimDistanceFromBackboard, backboardDistanceFromBaseline, poleSetback } =
@@ -86,7 +88,7 @@ export class Hoop {
       .setRestitution(PhysicsMaterials.structure.restitution)
       .setFriction(PhysicsMaterials.structure.friction)
       .setCollisionGroups(interactionGroups(CollisionGroup.Backboard, CollisionGroup.Ball));
-    physics.world.createCollider(poleColliderDesc, poleBody);
+    this.poleCollider = physics.world.createCollider(poleColliderDesc, poleBody);
 
     // safety padding wrap around the base, like a real arena stanchion pad
     const padMaterial = new THREE.MeshStandardMaterial({ color: 0x8f1c1c, roughness: 0.85 });

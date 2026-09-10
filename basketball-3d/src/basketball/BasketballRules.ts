@@ -10,7 +10,7 @@ const SHOT_CLOCK_REBOUND_SECONDS = 14;
 const PAINT_VIOLATION_SECONDS = 3;
 const TOTAL_QUARTERS = 4;
 
-export type ViolationType = 'shotClock' | 'threeSeconds' | 'outOfBounds';
+export type ViolationType = 'shotClock' | 'threeSeconds' | 'outOfBounds' | 'basketSupport';
 
 export interface GameEvent {
   kind: 'score' | 'violation' | 'quarterEnd' | 'gameEnd';
@@ -85,6 +85,16 @@ export class BasketballRules {
   /** Call from Game.ts whenever the physics step reports a ball/rim collision starting. */
   notifyRimContact(): void {
     if (this.pendingShot) this.pendingShot.touchedRim = true;
+  }
+
+  /**
+   * Rule 8-Section II-1: the ball is out-of-bounds the instant it touches
+   * "the supports ... of the backboard" - contact with the pole (and, if
+   * they ever get their own colliders, the arm/bracket) is a dead ball,
+   * not just a legal bounce off one more piece of court furniture.
+   */
+  notifyBasketSupportContact(): void {
+    this.callViolation('basketSupport', 'Hit the basket support - dead ball');
   }
 
   /** Call once per fixed physics step. */
