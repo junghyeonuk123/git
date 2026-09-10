@@ -179,6 +179,27 @@ function legStanceDrop(hip: number, knee: number): number {
   return Math.max(0, footY); // foot rest height is exactly 0, so this is the lift
 }
 
+/**
+ * How much the shooter's body has been driven off the floor at a given
+ * point in the charge: 0 while dipping, ramping to SHOT_JUMP_HEIGHT as
+ * the legs extend. Exported because Game.ts needs the value at the exact
+ * moment of release to know what height the airborne phase should fall
+ * from, so the jump and the landing are one continuous motion rather
+ * than two disconnected animations.
+ */
+export function shotChargeLift(chargeT: number): number {
+  const t = Math.min(1, Math.max(0, chargeT));
+  if (t <= SHOT_DIP_END) return 0;
+  if (t <= SHOT_RISE_END) {
+    const riseT = (t - SHOT_DIP_END) / (SHOT_RISE_END - SHOT_DIP_END);
+    return SHOT_JUMP_HEIGHT * riseT * riseT * (3 - 2 * riseT); // smoothstep - an explosive drive, not a linear elevator
+  }
+  // Past the apex the player comes back down, so holding the button
+  // forever lands them rather than parking them in mid-air.
+  const fallT = (t - SHOT_RISE_END) / (1 - SHOT_RISE_END);
+  return SHOT_JUMP_HEIGHT * (1 - fallT * fallT);
+}
+
 /** Tunables for the procedural walk-cycle animation. */
 const WALK_STRIDE_LENGTH = 1.6; // meters of travel per full gait cycle
 const WALK_LEG_AMPLITUDE = 0.55; // radians, hip swing
@@ -215,18 +236,32 @@ const ELBOW_BENT = 2.0;
 
 /**
  * Jump-shot tunables, taken from frame-stepping real broadcast footage:
- * the shooter loads into a deep knee bend, leaves the floor by roughly a
- * foot, tucks the legs at the apex, holds both arms extended overhead
- * through the release, and lands about six tenths of a second after
- * takeoff. All of it is purely visual - the physics capsule never
- * leaves the ground, so nothing about ball flight, collision or the
- * character controller is affected.
+ * the shooter dips into a deep knee bend, drives up out of it, releases
+ * ON THE WAY UP, and lands shortly after. All of it is purely visual -
+ * the physics capsule never leaves the ground, so nothing about ball
+ * flight, collision or the character controller is affected.
+ *
+ * The ordering matters more than the numbers. The lift used to start at
+ * the release, which meant the ball was already gone before the player
+ * left the floor - reading as the shooter hovering upward on their own
+ * after the shot rather than jumping into it.
  */
-const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at full windup - deeper than the standing dribble stance, this is the dip the jump comes out of
+const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at the bottom of the dip
 const SHOT_LOAD_HIP = 0.68; // radians the thigh pitches forward through the load (applied negative)
-const SHOT_JUMP_HEIGHT = 0.3; // meters off the floor at the apex
-const SHOT_AIR_TUCK = 0.8; // radians of knee tuck at the apex
-const SHOT_AIR_HIP = 0.16; // radians the thighs drift forward while airborne (applied negative)
+/** Charge progress where the dip bottoms out and the legs start driving upward. */
+const SHOT_DIP_END = 0.25;
+/**
+ * Charge progress where the drive tops out. Placed so the swish release
+ * window (meter 0.62-0.70, i.e. charge 0.54-0.61) lands right at the top
+ * of the jump: time the shot well and it leaves the hand at the apex.
+ * Hold past this and the player is already coming back down - shooting
+ * on the way down, which is both what the "too strong" zone should feel
+ * like and what stops an over-held shot from hovering at the apex.
+ */
+const SHOT_RISE_END = 0.6;
+const SHOT_JUMP_HEIGHT = 0.17; // meters off the floor at the top of the drive - a jump shot, not a dunk approach
+const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
+const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
 const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
 
 /** Defensive athletic stance (bent knees, arms spread wide) - see setGuardingPose. */
@@ -440,21 +475,30 @@ export class Player {
    * before/alongside pointArmAtBall, which handles the ball-side arm.
    */
   loadShot(t: number): void {
-    const load = clamp(t, 0, 1);
-    const hip = SHOT_LOAD_HIP * load;
-    const knee = SHOT_LOAD_KNEE * load;
-    // Deepens whatever stance updateWalkCycle already produced rather
-    // than fighting it, then re-plants the feet for the combined bend.
+    const charge = clamp(t, 0, 1);
+    // Dip deepens to the bottom of the load, then unwinds as the legs
+    // drive upward - so the deep bend and the lift are one motion, not a
+    // squat that stays squatted while the body floats up out of it.
+    const dip =
+      charge <= SHOT_DIP_END
+        ? charge / SHOT_DIP_END
+        : Math.max(0, 1 - (charge - SHOT_DIP_END) / (SHOT_RISE_END - SHOT_DIP_END));
+
     const priorKnee = this.rig.legs.left.lower.rotation.x;
-    const finalKnee = Math.max(priorKnee, knee);
+    const hip = Math.max(CROUCH_HIP_BEND * this.currentCrouch, SHOT_LOAD_HIP * dip);
+    const knee = Math.max(priorKnee * dip, SHOT_LOAD_KNEE * dip);
     for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
-      leg.lower.rotation.x = finalKnee;
-      leg.upper.rotation.x = -Math.max(CROUCH_HIP_BEND * load, hip);
+      leg.lower.rotation.x = knee;
+      leg.upper.rotation.x = -hip;
     }
-    this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, CROUCH_TORSO_LEAN * load);
+    this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, CROUCH_TORSO_LEAN * dip);
+
+    // Undo the walk cycle's own crouch planting, apply this stance's,
+    // then add however far the drive has lifted the body off the floor.
     this.visualRoot.position.y +=
       legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) -
-      legStanceDrop(Math.max(CROUCH_HIP_BEND * load, hip), finalKnee);
+      legStanceDrop(hip, knee) +
+      shotChargeLift(charge);
   }
 
   /**
@@ -472,13 +516,18 @@ export class Player {
    * updateWalkCycle's bob/crouch offsets are, so the physics capsule,
    * ball flight and character controller are all untouched.
    */
-  updateShotAir(hand: 1 | -1, t: number): void {
+  updateShotAir(hand: 1 | -1, t: number, fromHeight: number): void {
     const air = clamp(t, 0, 1);
-    const arc = Math.sin((1 - air) * Math.PI); // 0 at takeoff, 1 at apex, 0 on landing
+    // The player is ALREADY airborne when the ball leaves (the drive
+    // happened during the charge - see shotChargeLift), so this half is
+    // purely the descent: start at whatever height the release happened
+    // at and accelerate down to the floor like gravity, rather than
+    // starting a fresh hop from zero after the ball has gone.
+    const height = fromHeight * (1 - (1 - air) * (1 - air));
 
     for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
-      leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * arc);
-      leg.upper.rotation.x = -SHOT_AIR_HIP * arc;
+      leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * air);
+      leg.upper.rotation.x = -SHOT_AIR_HIP * air;
     }
 
     // Both arms finish overhead - the guide hand comes up with the
@@ -490,9 +539,9 @@ export class Player {
     shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
     shootArm.lower.rotation.x = ELBOW_STRAIGHT;
     guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);
-    guideArm.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - arc);
+    guideArm.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - air);
 
-    this.visualRoot.position.y += SHOT_JUMP_HEIGHT * arc;
+    this.visualRoot.position.y += height;
   }
 
   /**

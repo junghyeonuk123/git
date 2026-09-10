@@ -96,18 +96,37 @@ export class DribbleSystem {
     const vy = Math.sqrt(2 * this.gravity * riseHeight);
     const tRise = vy / this.gravity; // time from this bounce to reaching that peak
 
-    if (playerVelocity) {
-      this.handPos.x += playerVelocity.x * tRise;
-      this.handPos.z += playerVelocity.y * tRise;
-    }
+    // A dribble's horizontal motion is "the ball travels along with me",
+    // NOT "the ball flies to wherever my hand is". Those are the same
+    // thing while running in a straight line, but they diverge hard the
+    // moment the player cuts: solving for "arrive exactly at the hand"
+    // demanded whatever velocity that took - up to the old 9 m/s cap -
+    // so on a direction change the ball got flung sideways after the
+    // player. That is exactly the "ball on a string being dragged
+    // around" look, and no amount of retuning the old formula fixes it,
+    // because chasing the hand IS the formula.
+    //
+    // So the two parts are now separated and only the second one is
+    // capped: the ball inherits the player's own velocity (that is the
+    // hand carrying it along), plus a deliberately small convergence
+    // term that nudges it back under the hand over the next bounce or
+    // two. Cut hard and the ball genuinely falls behind for a beat and
+    // has to be recovered - which is what real dribbling looks like.
+    const playerVx = playerVelocity?.x ?? 0;
+    const playerVz = playerVelocity?.y ?? 0;
+    const correctionX = THREE.MathUtils.clamp(
+      (this.handPos.x - ballPos.x) / tRise,
+      -CFG.maxHandConvergence,
+      CFG.maxHandConvergence,
+    );
+    const correctionZ = THREE.MathUtils.clamp(
+      (this.handPos.z - ballPos.z) / tRise,
+      -CFG.maxHandConvergence,
+      CFG.maxHandConvergence,
+    );
 
-    const dx = this.handPos.x - ballPos.x;
-    const dz = this.handPos.z - ballPos.z;
-    const aimVx = THREE.MathUtils.clamp(dx / tRise, -CFG.maxHorizontalCorrection, CFG.maxHorizontalCorrection);
-    const aimVz = THREE.MathUtils.clamp(dz / tRise, -CFG.maxHorizontalCorrection, CFG.maxHorizontalCorrection);
-
-    const vx = THREE.MathUtils.lerp(incomingVel.x, aimVx, 1 - CFG.movementInfluence);
-    const vz = THREE.MathUtils.lerp(incomingVel.z, aimVz, 1 - CFG.movementInfluence);
+    const vx = THREE.MathUtils.lerp(incomingVel.x, playerVx + correctionX, 1 - CFG.movementInfluence);
+    const vz = THREE.MathUtils.lerp(incomingVel.z, playerVz + correctionZ, 1 - CFG.movementInfluence);
 
     this.ball.body.setLinvel({ x: vx, y: vy, z: vz }, true);
   }

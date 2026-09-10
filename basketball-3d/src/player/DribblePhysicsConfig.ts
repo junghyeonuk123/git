@@ -18,13 +18,16 @@ export const DribblePhysicsConfig = {
   dribbleHeightHigh: 0.76, // triple-threat, more control
 
   /**
-   * m/s cap on the horizontal steering velocity set at each bounce. Must
-   * comfortably exceed the player's fastest movement speed (sprint,
-   * 6.2 m/s) or the ball becomes structurally unable to keep pace while
-   * sprinting, and the gap grows without bound instead of tracking the
-   * player.
+   * m/s cap on the *convergence* half of a bounce's horizontal velocity -
+   * the part that pulls the ball back under the hand, on top of the
+   * player's own velocity which the ball inherits outright. Capping this
+   * (rather than the total, which is what the old maxHorizontalCorrection
+   * did at 9 m/s) is what stops the ball being flung sideways to chase
+   * the hand through a direction change. Sized so one bounce closes a
+   * bit under a meter: enough to recover from a normal cut within a
+   * bounce or two, nowhere near enough to look magnetic.
    */
-  maxHorizontalCorrection: 9,
+  maxHandConvergence: 2.4,
 
   /** Meters above the floor the "bounce" trigger arms within. */
   contactTolerance: 0.05,
@@ -42,5 +45,5 @@ export const DribblePhysicsConfig = {
    * ball visibly trail the player during ordinary movement (see
    * DribbleSystem.ts's header comment for the full story).
    */
-  movementInfluence: 0.08,
+  movementInfluence: 0.2,
 } as const;

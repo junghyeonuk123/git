@@ -9,7 +9,7 @@ import { Crowd } from '@/environment/Crowd';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
-import { Player } from '@/player/Player';
+import { Player, shotChargeLift } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
 import { METER_CAP, nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { DefenderAI } from '@/ai/DefenderAI';
@@ -78,8 +78,10 @@ export class Game {
   /** Seconds remaining in the post-release airborne jump-shot window - see Player.updateShotAir. */
   private shotAirTimer = 0;
   private shotAirHand: 1 | -1 = 1;
-  /** Matches real jump-shot hang time closely enough to read: takeoff to landing in a bit over half a second. */
-  private static readonly SHOT_AIR_DURATION = 0.62;
+  /** How high off the floor the shooter's drive had carried them at the instant of release - the descent falls from here. */
+  private shotAirFromHeight = 0;
+  /** Just the descent: the rise already happened during the charge, so this is short. */
+  private static readonly SHOT_AIR_DURATION = 0.26;
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
@@ -230,6 +232,9 @@ export class Game {
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
       this.shotAirTimer = Game.SHOT_AIR_DURATION;
       this.shotAirHand = this.playerController.hand;
+      // release() leaves the meter at its release value, so this is the
+      // charge progress the shot actually went up at.
+      this.shotAirFromHeight = shotChargeLift(this.playerController.shooting.meter / METER_CAP);
     }
     this.rules.update(
       dt,
@@ -355,7 +360,7 @@ export class Game {
       }
     } else if (this.shotAirTimer > 0) {
       this.shotAirTimer = Math.max(0, this.shotAirTimer - dt);
-      this.player.updateShotAir(this.shotAirHand, this.shotAirTimer / Game.SHOT_AIR_DURATION);
+      this.player.updateShotAir(this.shotAirHand, this.shotAirTimer / Game.SHOT_AIR_DURATION, this.shotAirFromHeight);
     }
     this.cameraController.update(this.player.position, this.ball.position, dt, {
       speed: this.playerController.movement.speed,
