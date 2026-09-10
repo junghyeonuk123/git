@@ -8,7 +8,16 @@ import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 // Exported so ui/ShotMeter.ts draws the exact same zone boundaries the
 // release logic below actually uses - one source of truth.
 export const METER_CAP = 1.15;
-export const ZONE_WEAK_MAX = 0.62; // also doubles as the swish window's lower bound
+/**
+ * Also doubles as the swish window's lower bound. Widened from 0.62 when
+ * FILL_RATE went to 1.7: the zones are meter units, so a faster fill
+ * silently shrinks every window in real time, and the swish window would
+ * have gone from 80ms to 47ms - the shot would have become much harder
+ * purely as a side effect of fixing the animation. At 0.57 the window is
+ * 79ms again, and it straddles the jump's apex (0.335-0.412s vs an apex
+ * at 0.374s), so a well-timed release still leaves the hand at the top.
+ */
+export const ZONE_WEAK_MAX = 0.57;
 export const ZONE_SWISH_MAX = 0.7;
 export const ZONE_BANK_MAX = 0.8;
 
@@ -22,7 +31,7 @@ export const ZONE_BANK_MAX = 0.8;
 // gather height over the charge gets a real winding-up arm motion for
 // free, with no separate shooting-pose animation system needed.
 const GATHER_HEIGHT_LOW = 1.0; // catch pocket, roughly hip/chest height
-const GATHER_HEIGHT_HIGH = 1.62; // set point, just above SHOULDER_HEIGHT (1.55) - forehead height, which is where a real jumper releases
+const GATHER_HEIGHT_HIGH = 1.50; // set point measured from the FLOOR; the jump adds its own 0.25 on top, so the ball actually leaves the hand around 1.75
 // Windup finishes right around the swish window's release timing, not at
 // METER_CAP - holding past the sweet spot (bank/strong) keeps the ball
 // at full extension rather than continuing to rise indefinitely.
@@ -37,7 +46,7 @@ const WINDUP_METER = ZONE_SWISH_MAX;
  * at the chest. Short on purpose: a real gather is fast, it just isn't
  * instantaneous.
  */
-const SCOOP_METER = 0.13;
+const SCOOP_METER = 0.17; // ~0.10s at FILL_RATE
 
 /**
  * How far the ball slides in from the dribbling hand toward the body's
@@ -49,7 +58,17 @@ const SCOOP_METER = 0.13;
  * real set point stays slightly to the shooting side.
  */
 const GATHER_CENTERING = 0.75;
-const FILL_RATE = 1.0; // meter units per second
+/**
+ * Meter units per second. Raised from 1.0 so the swish window (meter
+ * 0.62-0.70) is reached 0.36-0.41s after the button goes down, which is
+ * exactly when a real jump lands its apex (Player.SHOT_TAKEOFF_SPEED
+ * puts the peak at 0.374s). The old 1.0 needed 0.62-0.70s to get there,
+ * and a jump cannot stay in the air that long without floating - the
+ * meter's pace was quietly forcing the animation to be slower than
+ * gravity. Timing the release well now means releasing at the top of a
+ * real jump.
+ */
+const FILL_RATE = 1.7;
 const BACKSPIN = 26; // rad/s, purely visual - see Ball seam rendering
 
 export type ShotZone = 'weak' | 'swish' | 'bank' | 'strong';
@@ -152,6 +171,16 @@ export class ShootingSystem {
   /** Ball height above the court the frame the gather started, so the scoop begins from where the ball really was. */
   private gatherFromY = GATHER_HEIGHT_LOW;
 
+  /**
+   * Real seconds since the shoot button went down. The meter fills at a
+   * constant rate, so it doubles as the shot motion's clock - which is
+   * what lets the body's jump run on gravity's timing (see
+   * Player.shotChargeLift) instead of on charge progress.
+   */
+  get chargeSeconds(): number {
+    return this.meter / FILL_RATE;
+  }
+
   constructor(
     private readonly player: Player,
     private readonly ball: Ball,
@@ -189,7 +218,7 @@ export class ShootingSystem {
     // under it - so the shot appeared to be released from way up high by
     // someone floating. Adding the same lift the legs are producing
     // keeps ball and hands as one unit for the whole motion.
-    const gatherHeight = pocketHeight + shotChargeLift(this.meter / METER_CAP);
+    const gatherHeight = pocketHeight + shotChargeLift(this.chargeSeconds);
 
     const gatherPos = new THREE.Vector3();
     this.player.getHandPosition(gatherPos, hand * (1 - GATHER_CENTERING * windupT), gatherHeight);

@@ -11,6 +11,10 @@ const GROUNDED_STICK_VELOCITY = -0.6;
 const UP = new THREE.Vector3(0, 1, 0);
 /** Scratch target for updateDribbleArm - avoids allocating a Vector3 every frame. */
 const HAND_TARGET = new THREE.Vector3();
+/** Scratch + geometry for the hand anchor: out to the side of the hip, and a little in front of it. */
+const HAND_OFFSET = new THREE.Vector3();
+const HAND_SIDE_OFFSET = 0.32;
+const HAND_FORWARD_OFFSET = 0.22;
 const DOWN = new THREE.Vector3(0, -1, 0);
 
 /** A two-segment limb: `upper` is the hip/shoulder pivot, `lower` (its child) is the knee/elbow pivot. */
@@ -182,24 +186,40 @@ function legStanceDrop(hip: number, knee: number): number {
 }
 
 /**
- * How much the shooter's body has been driven off the floor at a given
- * point in the charge: 0 while dipping, ramping to SHOT_JUMP_HEIGHT as
- * the legs extend. Exported because Game.ts needs the value at the exact
- * moment of release to know what height the airborne phase should fall
- * from, so the jump and the landing are one continuous motion rather
- * than two disconnected animations.
+ * The shooter's height off the floor at `elapsed` seconds into the shot
+ * motion. This is a REAL ballistic arc - one takeoff speed and actual
+ * gravity - not a curve fitted to charge progress.
+ *
+ * That distinction is the whole fix for the shot reading as levitation.
+ * The previous version keyed the rise to how far along the meter was, so
+ * the body took ~0.40s to climb and ~0.46s to come back down. A 13cm hop
+ * under real gravity is a 0.33s round trip, so the shooter was moving
+ * vertically at well under half the speed gravity would carry them - and
+ * the eye reads that as floating no matter how small the hop is. The
+ * height was never the problem; the timing was.
+ *
+ * Being a function of seconds rather than of progress also means the
+ * airborne phase after release just keeps advancing the same clock (see
+ * Game.ts's shotAirElapsed), so takeoff, release and landing are one
+ * continuous arc with no seam where the ball leaves.
  */
-export function shotChargeLift(chargeT: number): number {
-  const t = Math.min(1, Math.max(0, chargeT));
-  if (t <= SHOT_DIP_END) return 0;
-  if (t <= SHOT_RISE_END) {
-    const riseT = (t - SHOT_DIP_END) / (SHOT_RISE_END - SHOT_DIP_END);
-    return SHOT_JUMP_HEIGHT * riseT * riseT * (3 - 2 * riseT); // smoothstep - an explosive drive, not a linear elevator
-  }
-  // Past the apex the player comes back down, so holding the button
-  // forever lands them rather than parking them in mid-air.
-  const fallT = (t - SHOT_RISE_END) / (1 - SHOT_RISE_END);
-  return SHOT_JUMP_HEIGHT * (1 - fallT * fallT);
+export function shotChargeLift(elapsedSeconds: number): number {
+  const t = elapsedSeconds - SHOT_DIP_SECONDS;
+  if (t <= 0) return 0;
+  return Math.max(0, SHOT_TAKEOFF_SPEED * t - 0.5 * SHOT_JUMP_GRAVITY * t * t);
+}
+
+/**
+ * How deep into the loaded stance the shooter is at `elapsed` seconds:
+ * sinking through the dip, then extending explosively as the legs drive
+ * the body off the floor. Hitting 0 exactly as the jump starts is what
+ * makes the dip and the takeoff read as one push rather than a squat the
+ * body then floats up out of.
+ */
+function shotDipAmount(elapsedSeconds: number): number {
+  if (elapsedSeconds <= SHOT_DIP_SECONDS) return elapsedSeconds / SHOT_DIP_SECONDS;
+  const extendT = (elapsedSeconds - SHOT_DIP_SECONDS) / SHOT_EXTEND_SECONDS;
+  return Math.max(0, 1 - extendT);
 }
 
 /** Tunables for the procedural walk-cycle animation. */
@@ -263,18 +283,20 @@ const ELBOW_BENT = 2.0;
  */
 const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at the bottom of the dip
 const SHOT_LOAD_HIP = 0.68; // radians the thigh pitches forward through the load (applied negative)
-/** Charge progress where the dip bottoms out and the legs start driving upward. */
-const SHOT_DIP_END = 0.25;
+/** Seconds spent sinking into the load before the legs fire. */
+const SHOT_DIP_SECONDS = 0.15;
+/** Seconds the legs take to snap from fully loaded to fully extended - this IS the takeoff. */
+const SHOT_EXTEND_SECONDS = 0.12;
 /**
- * Charge progress where the drive tops out. Placed so the swish release
- * window (meter 0.62-0.70, i.e. charge 0.54-0.61) lands right at the top
- * of the jump: time the shot well and it leaves the hand at the apex.
- * Hold past this and the player is already coming back down - shooting
- * on the way down, which is both what the "too strong" zone should feel
- * like and what stops an over-held shot from hovering at the apex.
+ * Takeoff speed, m/s. Everything about the jump follows from this and
+ * gravity: apex = v^2/2g = 0.247m, reached 0.224s after takeoff, back on
+ * the floor 0.449s after takeoff. Deliberately a jump shot's hop, not a
+ * max-effort vertical.
  */
-const SHOT_RISE_END = 0.6;
-const SHOT_JUMP_HEIGHT = 0.13; // meters off the floor at the top of the drive - a jump shot, not a dunk approach
+const SHOT_TAKEOFF_SPEED = 2.2;
+const SHOT_JUMP_GRAVITY = 9.81;
+/** Seconds from the button going down to the shooter's feet being back on the floor. */
+export const SHOT_LANDING_SECONDS = SHOT_DIP_SECONDS + (2 * SHOT_TAKEOFF_SPEED) / SHOT_JUMP_GRAVITY;
 const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
 const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
 const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
@@ -521,20 +543,17 @@ export class Player {
   }
 
   /**
-   * The windup half of a jump shot: sinking into a loaded stance as the
-   * shot charges. `t` is charge progress, 0..1. Call after
-   * updateWalkCycle (it deepens whatever stance that produced) and
-   * before/alongside pointArmAtBall, which handles the ball-side arm.
+   * The windup half of a jump shot: sinking into a loaded stance and
+   * then driving up out of it. `elapsedSeconds` is real time since the
+   * shoot button went down, NOT charge progress - the whole point of the
+   * rewrite is that the body's vertical motion runs on gravity's clock
+   * rather than the meter's. Call after updateWalkCycle (it deepens
+   * whatever stance that produced) and before/alongside pointArmAtBall,
+   * which handles the ball-side arm.
    */
-  loadShot(t: number): void {
-    const charge = clamp(t, 0, 1);
-    // Dip deepens to the bottom of the load, then unwinds as the legs
-    // drive upward - so the deep bend and the lift are one motion, not a
-    // squat that stays squatted while the body floats up out of it.
-    const dip =
-      charge <= SHOT_DIP_END
-        ? charge / SHOT_DIP_END
-        : Math.max(0, 1 - (charge - SHOT_DIP_END) / (SHOT_RISE_END - SHOT_DIP_END));
+  loadShot(elapsedSeconds: number): void {
+    const elapsed = Math.max(0, elapsedSeconds);
+    const dip = shotDipAmount(elapsed);
 
     const priorKnee = this.rig.legs.left.lower.rotation.x;
     const hip = Math.max(CROUCH_HIP_BEND * this.currentCrouch, SHOT_LOAD_HIP * dip);
@@ -550,7 +569,7 @@ export class Player {
     this.visualRoot.position.y +=
       legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) -
       legStanceDrop(hip, knee) +
-      shotChargeLift(charge);
+      shotChargeLift(elapsed);
   }
 
   /**
@@ -563,19 +582,22 @@ export class Player {
    * snap straight back to the idle pose the instant the ball left the
    * hand, with the player never leaving the ground at all.
    *
-   * `t` runs 1 (just left the floor) down to 0 (landed). Entirely
-   * visual: the lift is applied to visualRoot the same way
-   * updateWalkCycle's bob/crouch offsets are, so the physics capsule,
+   * `elapsedSeconds` is the SAME clock loadShot was being driven by, just
+   * kept running past the release, so the height comes straight back out
+   * of shotChargeLift and the arc continues with no seam where the ball
+   * leaves. Entirely visual: the lift is applied to visualRoot the same
+   * way updateWalkCycle's bob/crouch offsets are, so the physics capsule,
    * ball flight and character controller are all untouched.
    */
-  updateShotAir(hand: 1 | -1, t: number, fromHeight: number): void {
-    const air = clamp(t, 0, 1);
-    // The player is ALREADY airborne when the ball leaves (the drive
-    // happened during the charge - see shotChargeLift), so this half is
-    // purely the descent: start at whatever height the release happened
-    // at and accelerate down to the floor like gravity, rather than
-    // starting a fresh hop from zero after the ball has gone.
-    const height = fromHeight * (1 - (1 - air) * (1 - air));
+  updateShotAir(hand: 1 | -1, elapsedSeconds: number): void {
+    const height = shotChargeLift(elapsedSeconds);
+    // 1 at takeoff, 0 at touchdown - drives the leg tuck and the guide
+    // hand relaxing out of the follow-through on the way down.
+    const air = clamp(
+      (SHOT_LANDING_SECONDS - elapsedSeconds) / (SHOT_LANDING_SECONDS - SHOT_DIP_SECONDS),
+      0,
+      1,
+    );
 
     for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
       leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * air);
@@ -664,9 +686,38 @@ export class Player {
    */
   getHandPosition(out: THREE.Vector3, side: number, heightAboveGround: number): THREE.Vector3 {
     const p = this.position;
-    const yaw = this.facingYaw;
-    const localOffset = new THREE.Vector3(side * 0.32, 0, 0.22);
-    localOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    return out.set(p.x + localOffset.x, this.groundY + heightAboveGround, p.z + localOffset.z);
+    HAND_OFFSET.set(side * HAND_SIDE_OFFSET, 0, HAND_FORWARD_OFFSET).applyAxisAngle(UP, this.facingYaw);
+    return out.set(p.x + HAND_OFFSET.x, this.groundY + heightAboveGround, p.z + HAND_OFFSET.z);
+  }
+
+  /**
+   * Where getHandPosition will be in `seconds`, assuming the player
+   * carries on at `velocity` and finishes turning to face it.
+   *
+   * The dribble needs this because a push has to land the ball where the
+   * hand will be a whole bounce from now, and the hand does not simply
+   * translate with the body - it swings around it as the player turns,
+   * by up to half a metre through a 90-degree cut. Aiming at the hand's
+   * present position ignored that swing entirely, so starting a drive
+   * (which is a turn AND an acceleration at once) put the ball out of
+   * reach inside a single bounce and the dribble was dropped on the
+   * spot.
+   */
+  getPredictedHandPosition(
+    out: THREE.Vector3,
+    side: number,
+    heightAboveGround: number,
+    velocity: THREE.Vector2,
+    seconds: number,
+  ): THREE.Vector3 {
+    const p = this.position;
+    const moving = velocity.lengthSq() > 1e-6;
+    const yaw = moving ? Math.atan2(velocity.x, velocity.y) : this.facingYaw; // .y stores world Z
+    HAND_OFFSET.set(side * HAND_SIDE_OFFSET, 0, HAND_FORWARD_OFFSET).applyAxisAngle(UP, yaw);
+    return out.set(
+      p.x + velocity.x * seconds + HAND_OFFSET.x,
+      this.groundY + heightAboveGround,
+      p.z + velocity.y * seconds + HAND_OFFSET.z,
+    );
   }
 }

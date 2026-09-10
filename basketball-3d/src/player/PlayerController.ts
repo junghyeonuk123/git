@@ -179,7 +179,15 @@ export class PlayerController {
       : isStationary
         ? DRIBBLE_HEIGHT_HIGH
         : DRIBBLE_HEIGHT_NORMAL;
-    this.dribble.fixedUpdate(dt, this.hand, dribbleHeight, this.movement.velocity);
+    // A dribble is now only kept alive by the hand actually reaching the
+    // ball each cycle (see DribbleSystem), so it can genuinely get away
+    // from the handler. When it does, it becomes a live loose ball and
+    // the normal recovery path takes over - the same state as a steal.
+    if (this.dribble.fixedUpdate(dt, this.hand, dribbleHeight, this.movement.targetVelocity)) {
+      this.forceLoseBall();
+      this.stateMachine.enter('walk');
+      return;
+    }
 
     const activeMove = this.moves.activeType;
     if (activeMove !== null) {

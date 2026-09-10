@@ -9,9 +9,9 @@ import { Crowd } from '@/environment/Crowd';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
-import { Player, shotChargeLift } from '@/player/Player';
+import { Player, SHOT_LANDING_SECONDS } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
-import { METER_CAP, nearestHoop, type ShotResult } from '@/player/ShootingSystem';
+import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { DefenderAI } from '@/ai/DefenderAI';
 import { classifyBallMotion, isRecoverable } from '@/basketball/LooseBallRecovery';
 import { CameraController } from '@/camera/CameraController';
@@ -75,13 +75,13 @@ export class Game {
   private lastSeenShotResult: ShotResult | null = null;
   private lastSeenRuleEventAt = -1;
   private elapsedTime = 0;
-  /** Seconds remaining in the post-release airborne jump-shot window - see Player.updateShotAir. */
-  private shotAirTimer = 0;
+  /**
+   * The shot motion's clock, kept running past the release so the jump
+   * arc continues uninterrupted through it (see Player.shotChargeLift).
+   * Negative means no shot is in the air.
+   */
+  private shotAirElapsed = -1;
   private shotAirHand: 1 | -1 = 1;
-  /** How high off the floor the shooter's drive had carried them at the instant of release - the descent falls from here. */
-  private shotAirFromHeight = 0;
-  /** Just the descent: the rise already happened during the charge, so this is short. */
-  private static readonly SHOT_AIR_DURATION = 0.26;
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
@@ -230,11 +230,12 @@ export class Game {
     if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
       this.lastSeenShotResult = this.playerController.lastShotResult;
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
-      this.shotAirTimer = Game.SHOT_AIR_DURATION;
       this.shotAirHand = this.playerController.hand;
-      // release() leaves the meter at its release value, so this is the
-      // charge progress the shot actually went up at.
-      this.shotAirFromHeight = shotChargeLift(this.playerController.shooting.meter / METER_CAP);
+      // release() leaves the meter at its release value, so this is how
+      // far into the jump the ball actually left the hand. Handing the
+      // same clock to updateShotAir is what makes takeoff, release and
+      // landing one arc instead of two animations stitched together.
+      this.shotAirElapsed = this.playerController.shooting.chargeSeconds;
     }
     this.rules.update(
       dt,
@@ -349,7 +350,7 @@ export class Game {
         // Sink into the loaded stance as the shot winds up, and bring
         // BOTH hands to the ball - a real gather is two-handed, where
         // this previously left the off hand swinging at the hip.
-        this.player.loadShot(this.playerController.shooting.meter / METER_CAP);
+        this.player.loadShot(this.playerController.shooting.chargeSeconds);
         this.player.pointArmAtBall(1, this.ball.position);
         this.player.pointArmAtBall(-1, this.ball.position);
       } else {
@@ -360,9 +361,10 @@ export class Game {
         // walking alongside it.
         this.player.updateDribbleArm(this.playerController.hand, this.ball.position);
       }
-    } else if (this.shotAirTimer > 0) {
-      this.shotAirTimer = Math.max(0, this.shotAirTimer - dt);
-      this.player.updateShotAir(this.shotAirHand, this.shotAirTimer / Game.SHOT_AIR_DURATION, this.shotAirFromHeight);
+    } else if (this.shotAirElapsed >= 0) {
+      this.shotAirElapsed += dt;
+      this.player.updateShotAir(this.shotAirHand, this.shotAirElapsed);
+      if (this.shotAirElapsed >= SHOT_LANDING_SECONDS) this.shotAirElapsed = -1;
     }
     this.cameraController.update(this.player.position, this.ball.position, dt, {
       speed: this.playerController.movement.speed,
@@ -410,7 +412,7 @@ export class Game {
         `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,
         `shotState: ${this.playerController.shooting.state}`,
         `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
-        `shotAir: ${this.shotAirTimer.toFixed(3)}s  visualY: ${this.player.visualRoot.position.y.toFixed(3)}`,
+        `shotAir: ${this.shotAirElapsed.toFixed(3)}s  chargeS: ${this.playerController.shooting.chargeSeconds.toFixed(3)}  visualY: ${this.player.visualRoot.position.y.toFixed(3)}`,
         `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,
@@ -435,7 +437,7 @@ export class Game {
         `hand: ${this.playerController.hand === 1 ? 'right' : 'left'}`,
         `dribblePhase: ${this.playerController.dribble.phase}`,
         `contactTimer: ${this.playerController.dribble.contactTimer.toFixed(3)}s`,
-        `handDistance: ${this.playerController.dribble.handDistance.toFixed(3)}m`,
+        `handDistance: ${this.playerController.dribble.handDistance.toFixed(3)}m  lastPush: ${this.playerController.dribble.pushSpeed.toFixed(2)}m/s`,
         `ballVel: ${bv.x.toFixed(2)}, ${bv.y.toFixed(2)}, ${bv.z.toFixed(2)}  (|v|=${bv.length().toFixed(2)})`,
         `ballAngVel: ${bav.length().toFixed(2)} rad/s`,
         `playerVel: ${pv.x.toFixed(2)}, ${pv.y.toFixed(2)}  (|v|=${this.playerController.movement.speed.toFixed(2)})`,

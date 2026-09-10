@@ -26,6 +26,18 @@ export const DEFAULT_MOVEMENT_CONFIG: PlayerMovementConfig = {
  */
 export class PlayerMovement {
   readonly velocity = new THREE.Vector2(0, 0); // world-space X/Z
+  /**
+   * The velocity this player is accelerating TOWARD this step, before
+   * the acceleration curve is applied. The dribble reads this rather
+   * than the live velocity: a push has to send the ball where the player
+   * is going to be a bounce from now, and coming out of a standstill the
+   * live velocity is still 0 while the player is already committed to a
+   * drive - aiming at that left the ball standing still on the spot
+   * while the player ran off, which is how a dribble gets dropped every
+   * time it starts. Stopping works the same way in reverse: the target
+   * drops to 0 and the ball is pushed to a stop with the player.
+   */
+  readonly targetVelocity = new THREE.Vector2(0, 0);
   facingYaw = 0;
   /** Multiplies max speed this step; dribble moves (see DribbleMoves.ts) drive this for freeze/burst beats. */
   speedScale = 1;
@@ -76,6 +88,7 @@ export class PlayerMovement {
   }
 
   private applyTarget(targetVx: number, targetVz: number, hasInput: boolean, dt: number): THREE.Vector2 {
+    this.targetVelocity.set(targetVx, targetVz);
     const rate = hasInput ? this.config.acceleration : this.config.deceleration;
     const t = clamp(rate * dt, 0, 1);
     this.velocity.x += (targetVx - this.velocity.x) * t;
