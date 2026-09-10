@@ -187,6 +187,20 @@ export class PlayerController {
     this.hasBall = true;
   }
 
+  /**
+   * External possession-loss trigger - currently only DefenderAI's steal
+   * check. Mirrors the exact same state this player ends up in when it
+   * naturally loses the ball on its own (shot release, pass, a rules
+   * violation): the next handlePossession tick picks up from here
+   * completely normally, running its usual loose-ball-recovery/locomotion
+   * branch, so a stolen ball isn't a special case anywhere downstream.
+   */
+  forceLoseBall(): void {
+    this.hasBall = false;
+    this.dribbleSprintActive = false;
+    this.ballOwnership.claim('free', 'none');
+  }
+
   /** Snaps the ball into the dribble hand immediately (used for the initial spawn only). */
   placeBallInHand(): void {
     const anchor = new THREE.Vector3();

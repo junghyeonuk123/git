@@ -12,6 +12,7 @@ import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
 import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
+import { DefenderAI } from '@/ai/DefenderAI';
 import { classifyBallMotion, isRecoverable } from '@/basketball/LooseBallRecovery';
 import { CameraController } from '@/camera/CameraController';
 import { Scoreboard } from '@/ui/Scoreboard';
@@ -60,6 +61,7 @@ export class Game {
   private cameraController!: CameraController;
   private player!: Player;
   private playerController!: PlayerController;
+  private defender!: DefenderAI;
   private ball!: Ball;
   private hoops: Hoop[] = [];
   private crowd!: Crowd;
@@ -118,6 +120,7 @@ export class Game {
     onProgress(0.7, 'Spawning players…');
     this.cameraController = new CameraController(window.innerWidth / window.innerHeight);
     this.player = new Player(this.scene, this.physics, new THREE.Vector3(-4, 0, 0));
+    this.defender = new DefenderAI(this.scene, this.physics, new THREE.Vector3(-2, 0, 1.5));
 
     onProgress(0.85, 'Placing basketball…');
     this.ball = new Ball(this.scene, this.physics, new THREE.Vector3(-4, 1, 0));
@@ -208,6 +211,10 @@ export class Game {
     this.playerController.fixedUpdate(dt, this.hoops);
     if (this.player.position.y < -2) {
       this.player.resetToGround();
+    }
+    this.defender.fixedUpdate(dt, this.player, this.ball, this.hoops, this.playerController);
+    if (this.defender.player.position.y < -2) {
+      this.defender.player.resetToGround();
     }
     this.physics.step();
     this.checkBallCollisionEvents();
@@ -320,6 +327,8 @@ export class Game {
       this.playerController.dribbleSprintActive ? 1 : 0,
     );
     this.playerLight.position.set(this.player.position.x, this.player.position.y + 2.4, this.player.position.z);
+    this.defender.syncFromPhysics();
+    this.defender.updateVisuals(dt);
     this.ball.syncFromPhysics();
     if (this.playerController.hasBall) {
       // visually plants the dribbling hand on the ball instead of letting
@@ -378,6 +387,7 @@ export class Game {
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,
         `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,
+        `defenderPos: ${this.defender.player.position.x.toFixed(2)}, ${this.defender.player.position.z.toFixed(2)}  distToBall: ${this.defender.debugState.distanceToBall.toFixed(2)}  stealCooldown: ${this.defender.debugState.stealCooldown.toFixed(2)}`,
         `bodies: ${this.physics.world.bodies.len()}`,
         `colliders: ${this.physics.world.colliders.len()}`,
       );

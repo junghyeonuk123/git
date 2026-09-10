@@ -53,14 +53,29 @@ export class PlayerMovement {
   step(inputAxis: { x: number; y: number }, sprint: boolean, dt: number): THREE.Vector2 {
     const hasInput = inputAxis.x !== 0 || inputAxis.y !== 0;
     const maxSpeed = (sprint ? this.config.sprintSpeed : this.config.walkSpeed) * this.speedScale;
+    const targetVx = hasInput ? -inputAxis.x * maxSpeed : 0;
+    const targetVz = hasInput ? inputAxis.y * maxSpeed : 0;
+    return this.applyTarget(targetVx, targetVz, hasInput, dt);
+  }
 
-    let targetVx = 0;
-    let targetVz = 0;
-    if (hasInput) {
-      targetVx = -inputAxis.x * maxSpeed;
-      targetVz = inputAxis.y * maxSpeed;
-    }
+  /**
+   * AI-facing counterpart to step(): steers directly toward an
+   * already-world-space direction (defender AI computes "which way is
+   * toward my guarding spot" itself, so there's no keyboard input axis
+   * to convert - see step()'s doc comment for why that conversion
+   * exists at all). Shares the same acceleration/deceleration/turn-damp
+   * model so an AI-controlled player moves with the identical feel as
+   * the human-controlled one.
+   */
+  steerToward(direction: THREE.Vector2, sprint: boolean, dt: number): THREE.Vector2 {
+    const hasInput = direction.lengthSq() > 1e-6;
+    const maxSpeed = (sprint ? this.config.sprintSpeed : this.config.walkSpeed) * this.speedScale;
+    const targetVx = hasInput ? direction.x * maxSpeed : 0;
+    const targetVz = hasInput ? direction.y * maxSpeed : 0;
+    return this.applyTarget(targetVx, targetVz, hasInput, dt);
+  }
 
+  private applyTarget(targetVx: number, targetVz: number, hasInput: boolean, dt: number): THREE.Vector2 {
     const rate = hasInput ? this.config.acceleration : this.config.deceleration;
     const t = clamp(rate * dt, 0, 1);
     this.velocity.x += (targetVx - this.velocity.x) * t;
