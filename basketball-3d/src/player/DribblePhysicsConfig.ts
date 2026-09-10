@@ -6,10 +6,16 @@
  * DribbleSystem.ts - this is a pure extraction, not a retune.
  */
 export const DribblePhysicsConfig = {
-  /** Bounce apex height (meters above the floor) for each dribble stance. */
-  dribbleHeightLow: 0.6, // sprint dribble - tight and low, ball security over control
-  dribbleHeightNormal: 0.78, // walking/standard dribble
-  dribbleHeightHigh: 0.88, // triple-threat, more control
+  /**
+   * Bounce apex height (meters above the floor) for each dribble stance.
+   * Lowered across the board to match real footage, where a handler in a
+   * low stance keeps the ball around thigh height rather than up at the
+   * waist - and lowered again relative to the player because the stance
+   * itself now sits the body noticeably lower (see Player's CROUCH_*).
+   */
+  dribbleHeightLow: 0.5, // sprint dribble - tight and low, ball security over control
+  dribbleHeightNormal: 0.66, // walking/standard dribble
+  dribbleHeightHigh: 0.76, // triple-threat, more control
 
   /**
    * m/s cap on the horizontal steering velocity set at each bounce. Must

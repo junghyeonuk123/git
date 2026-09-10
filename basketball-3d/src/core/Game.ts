@@ -11,7 +11,7 @@ import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
 import { PlayerController } from '@/player/PlayerController';
-import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
+import { METER_CAP, nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { DefenderAI } from '@/ai/DefenderAI';
 import { classifyBallMotion, isRecoverable } from '@/basketball/LooseBallRecovery';
 import { CameraController } from '@/camera/CameraController';
@@ -75,10 +75,11 @@ export class Game {
   private lastSeenShotResult: ShotResult | null = null;
   private lastSeenRuleEventAt = -1;
   private elapsedTime = 0;
-  /** Seconds remaining in the post-release follow-through hold - see Player.holdFollowThrough. */
-  private followThroughTimer = 0;
-  private followThroughHand: 1 | -1 = 1;
-  private static readonly FOLLOW_THROUGH_DURATION = 0.3;
+  /** Seconds remaining in the post-release airborne jump-shot window - see Player.updateShotAir. */
+  private shotAirTimer = 0;
+  private shotAirHand: 1 | -1 = 1;
+  /** Matches real jump-shot hang time closely enough to read: takeoff to landing in a bit over half a second. */
+  private static readonly SHOT_AIR_DURATION = 0.62;
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
@@ -227,8 +228,8 @@ export class Game {
     if (this.playerController.lastShotResult && this.playerController.lastShotResult !== this.lastSeenShotResult) {
       this.lastSeenShotResult = this.playerController.lastShotResult;
       this.rules.beginShotAttempt(this.lastSeenShotResult, this.ball.position);
-      this.followThroughTimer = Game.FOLLOW_THROUGH_DURATION;
-      this.followThroughHand = this.playerController.hand;
+      this.shotAirTimer = Game.SHOT_AIR_DURATION;
+      this.shotAirHand = this.playerController.hand;
     }
     this.rules.update(
       dt,
@@ -327,25 +328,35 @@ export class Game {
     this.elapsedTime += dt;
     this.crowd.update(dt, this.elapsedTime);
     this.player.syncFromPhysics();
-    this.player.updateWalkCycle(
-      this.playerController.movement.speed,
-      dt,
-      this.playerController.dribbleSprintActive ? 1 : 0,
-    );
+    // A ball handler is in a low athletic stance essentially the whole
+    // time they have the ball, not only while sprinting - standing bolt
+    // upright over a live dribble was a large part of why the motion
+    // read as stiff next to real footage.
+    const stanceTarget = this.playerController.dribbleSprintActive ? 1 : this.playerController.hasBall ? 0.6 : 0;
+    this.player.updateWalkCycle(this.playerController.movement.speed, dt, stanceTarget);
     this.playerLight.position.set(this.player.position.x, this.player.position.y + 2.4, this.player.position.z);
     this.defender.syncFromPhysics();
     this.defender.updateVisuals(dt);
     this.ball.syncFromPhysics();
-    if (this.playerController.hasBall) {
-      // visually plants the dribbling hand on the ball instead of letting
-      // it read as a separate object bouncing near the player (spec
-      // section 26: ball/hand IK)
-      this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
-    } else if (this.followThroughTimer > 0) {
-      this.followThroughTimer = Math.max(0, this.followThroughTimer - dt);
-      this.player.holdFollowThrough(this.followThroughHand, this.followThroughTimer / Game.FOLLOW_THROUGH_DURATION);
-    }
     const charging = this.playerController.shooting.state === 'charging';
+    if (this.playerController.hasBall) {
+      if (charging) {
+        // Sink into the loaded stance as the shot winds up, and bring
+        // BOTH hands to the ball - a real gather is two-handed, where
+        // this previously left the off hand swinging at the hip.
+        this.player.loadShot(this.playerController.shooting.meter / METER_CAP);
+        this.player.pointArmAtBall(1, this.ball.position);
+        this.player.pointArmAtBall(-1, this.ball.position);
+      } else {
+        // visually plants the dribbling hand on the ball instead of letting
+        // it read as a separate object bouncing near the player (spec
+        // section 26: ball/hand IK)
+        this.player.pointArmAtBall(this.playerController.hand, this.ball.position);
+      }
+    } else if (this.shotAirTimer > 0) {
+      this.shotAirTimer = Math.max(0, this.shotAirTimer - dt);
+      this.player.updateShotAir(this.shotAirHand, this.shotAirTimer / Game.SHOT_AIR_DURATION);
+    }
     this.cameraController.update(this.player.position, this.ball.position, dt, {
       speed: this.playerController.movement.speed,
       charging,
@@ -392,6 +403,7 @@ export class Game {
         `ownershipCheck: ${this.playerController.ballOwnership.checkConsistency(this.ball) ?? 'ok'}`,
         `shotState: ${this.playerController.shooting.state}`,
         `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
+        `shotAir: ${this.shotAirTimer.toFixed(3)}s  visualY: ${this.player.visualRoot.position.y.toFixed(3)}`,
         `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,

@@ -161,6 +161,24 @@ function buildProceduralBody(jerseyColor: number): PlayerRig {
   return { root, torsoPivot, legs, arms };
 }
 
+/**
+ * How far a bent leg lifts the foot off the floor, from the rig's actual
+ * segment lengths - so any stance can drop the body by exactly that much
+ * and keep the feet planted. Hand-picked drop constants were the reason
+ * a deeper stance either floated the player above the floor or sank the
+ * shoes into it; deriving it means the bend angles can be tuned purely
+ * for how the pose reads, with foot contact staying correct for free.
+ *
+ * `hip` is the forward thigh pitch and `knee` the fold behind it, both
+ * as magnitudes (the negative-forward sign convention is applied by the
+ * callers - see the note above CROUCH_KNEE_BEND).
+ */
+function legStanceDrop(hip: number, knee: number): number {
+  const kneeY = HIP_HEIGHT - THIGH_LENGTH * Math.cos(hip);
+  const footY = kneeY - SHIN_LENGTH * Math.cos(knee - hip);
+  return Math.max(0, footY); // foot rest height is exactly 0, so this is the lift
+}
+
 /** Tunables for the procedural walk-cycle animation. */
 const WALK_STRIDE_LENGTH = 1.6; // meters of travel per full gait cycle
 const WALK_LEG_AMPLITUDE = 0.55; // radians, hip swing
@@ -171,24 +189,52 @@ const WALK_RAMP_SPEED = 0.3; // m/s at which swing amplitude reaches full streng
 const IDLE_SWAY_SPEED = 0.7; // rad/s
 const ARM_ELBOW_REST_BEND = 0.3; // radians, relaxed athletic elbow bend for the non-ball arm
 
-/** Lowered athletic stance while sprint-dribbling (spec section 26 posture note). */
-const CROUCH_DROP = 0.05; // meters
-const CROUCH_KNEE_BEND = 0.35; // radians added to both knees
-const CROUCH_TORSO_LEAN = 0.15; // radians of forward torso lean
+/**
+ * Lowered athletic stance. Deepened from the original values after
+ * frame-by-frame comparison against real broadcast footage: a ball
+ * handler is in a genuinely low stance - thighs well bent, torso leaned
+ * forward over the ball - essentially the whole time they have the ball,
+ * not just while sprinting. The old numbers left the player standing
+ * bolt upright while dribbling, which is a big part of why the motion
+ * read as stiff.
+ */
+// Sign convention for every pose below: this rig's limbs hang along -Y,
+// so a POSITIVE rotation.x swings a limb backward and a NEGATIVE one
+// swings it forward. A squat is therefore hip NEGATIVE (knee travels
+// forward) with knee POSITIVE (shin folds back underneath) - getting
+// that backwards folds the whole leg behind the body and reads as
+// kneeling, not as sinking into a stance.
+const CROUCH_KNEE_BEND = 1.15; // radians added to both knees
+const CROUCH_HIP_BEND = 0.55; // radians the thigh pitches FORWARD (applied negative)
+const CROUCH_TORSO_LEAN = 0.28; // radians of forward torso lean
 const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
 
 /** Elbow bend heuristic for pointArmAtBall - see that method for why this isn't full 2-bone IK. */
 const ELBOW_STRAIGHT = 0.1;
 const ELBOW_BENT = 2.0;
 
-/** Purely visual jump-shot lift during the follow-through hold - never touches the physics capsule. */
-const FOLLOW_THROUGH_HOP_HEIGHT = 0.09;
+/**
+ * Jump-shot tunables, taken from frame-stepping real broadcast footage:
+ * the shooter loads into a deep knee bend, leaves the floor by roughly a
+ * foot, tucks the legs at the apex, holds both arms extended overhead
+ * through the release, and lands about six tenths of a second after
+ * takeoff. All of it is purely visual - the physics capsule never
+ * leaves the ground, so nothing about ball flight, collision or the
+ * character controller is affected.
+ */
+const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at full windup - deeper than the standing dribble stance, this is the dip the jump comes out of
+const SHOT_LOAD_HIP = 0.68; // radians the thigh pitches forward through the load (applied negative)
+const SHOT_JUMP_HEIGHT = 0.3; // meters off the floor at the apex
+const SHOT_AIR_TUCK = 0.8; // radians of knee tuck at the apex
+const SHOT_AIR_HIP = 0.16; // radians the thighs drift forward while airborne (applied negative)
+const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
 
 /** Defensive athletic stance (bent knees, arms spread wide) - see setGuardingPose. */
-const GUARD_KNEE_BEND = 0.65;
-const GUARD_TORSO_LEAN = 0.22;
-const GUARD_ARM_SPREAD = 1.0; // radians outward from straight down
-const GUARD_ELBOW_BEND = 1.3;
+const GUARD_KNEE_BEND = 1.25; // a defender sits lower than the ball handler
+const GUARD_HIP_BEND = 0.6; // thigh pitched FORWARD (applied negative) so the stance squats rather than kneels
+const GUARD_TORSO_LEAN = 0.3;
+const GUARD_ARM_SPREAD = 1.15; // radians outward from straight down
+const GUARD_ELBOW_BEND = 0.9;
 
 export class Player {
   readonly visualRoot: THREE.Group;
@@ -328,8 +374,12 @@ export class Player {
     const leftKneeSwing = Math.max(0, Math.sin(this.walkPhase)) * WALK_KNEE_AMPLITUDE * swingStrength;
     const rightKneeSwing = Math.max(0, -Math.sin(this.walkPhase)) * WALK_KNEE_AMPLITUDE * swingStrength;
 
-    this.rig.legs.left.upper.rotation.x = swing;
-    this.rig.legs.right.upper.rotation.x = -swing;
+    // The thigh pitches back with the crouch as well as the knee folding,
+    // otherwise a deep knee bend reads as kneeling rather than sinking
+    // into a squat.
+    const hipCrouchBend = this.currentCrouch * CROUCH_HIP_BEND;
+    this.rig.legs.left.upper.rotation.x = swing - hipCrouchBend;
+    this.rig.legs.right.upper.rotation.x = -swing - hipCrouchBend;
     this.rig.legs.left.lower.rotation.x = leftKneeSwing + kneeCrouchBend;
     this.rig.legs.right.lower.rotation.x = rightKneeSwing + kneeCrouchBend;
 
@@ -341,10 +391,14 @@ export class Player {
     const bob = Math.abs(Math.sin(this.walkPhase * 2)) * WALK_BOB_AMPLITUDE * swingStrength;
     // subtle idle breathing sway so the character doesn't look frozen when standing still
     const idleSway = (1 - swingStrength) * Math.sin(this.idleTime * IDLE_SWAY_SPEED) * 0.01;
-    this.rig.torsoPivot.position.y = (SHOULDER_HEIGHT + HIP_HEIGHT) / 2 + idleSway - this.currentCrouch * CROUCH_DROP;
+    this.rig.torsoPivot.position.y = (SHOULDER_HEIGHT + HIP_HEIGHT) / 2 + idleSway;
     this.rig.torsoPivot.rotation.x = this.currentCrouch * CROUCH_TORSO_LEAN;
+    // The whole body sinks by exactly the height the bent legs lift the
+    // feet, so a deeper stance visibly lowers the player (the only part
+    // of a sagittal-plane knee bend that reads at all from the broadcast
+    // camera's over-the-shoulder angle) while the shoes stay planted.
     // called after syncFromPhysics each frame, so this offsets that frame's ground-truth foot height
-    this.visualRoot.position.y += bob - this.currentCrouch * CROUCH_DROP * 0.6;
+    this.visualRoot.position.y += bob - legStanceDrop(hipCrouchBend, kneeCrouchBend);
   }
 
   /**
@@ -380,30 +434,65 @@ export class Player {
   }
 
   /**
-   * Brief follow-through hold right after a shot release. Without this,
-   * the shooting arm snapped straight back to the idle/dribble pose the
-   * instant the ball left the hand (Game.ts only calls pointArmAtBall
-   * while hasBall is true, which flips false the moment release()
-   * succeeds) - there was no shot motion to see at all, just the ball
-   * appearing at chest height, then flight. Call for a short decaying
-   * window (t: 1 = just released, 0 = window over) instead of
-   * pointArmAtBall once hasBall goes false. Also gives the release a
-   * small purely-visual lift (never touches the physics capsule, same
-   * pattern as updateWalkCycle's bob/crouch offsets) so the shot reads
-   * as a real jump shot instead of a flat-footed release.
+   * The windup half of a jump shot: sinking into a loaded stance as the
+   * shot charges. `t` is charge progress, 0..1. Call after
+   * updateWalkCycle (it deepens whatever stance that produced) and
+   * before/alongside pointArmAtBall, which handles the ball-side arm.
    */
-  holdFollowThrough(hand: 1 | -1, t: number): void {
-    const chain = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
-    // "up and slightly forward" in the arm's own local space - already
-    // relative to facing since chain.upper is a direct child of
-    // visualRoot, so no world/yaw conversion is needed here the way
-    // pointArmAtBall needs one for its world-space ball target.
-    const localDir = new THREE.Vector3(0, 1, 0.3).normalize();
-    chain.upper.quaternion.setFromUnitVectors(DOWN, localDir);
-    chain.lower.rotation.x = ELBOW_STRAIGHT;
+  loadShot(t: number): void {
+    const load = clamp(t, 0, 1);
+    const hip = SHOT_LOAD_HIP * load;
+    const knee = SHOT_LOAD_KNEE * load;
+    // Deepens whatever stance updateWalkCycle already produced rather
+    // than fighting it, then re-plants the feet for the combined bend.
+    const priorKnee = this.rig.legs.left.lower.rotation.x;
+    const finalKnee = Math.max(priorKnee, knee);
+    for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
+      leg.lower.rotation.x = finalKnee;
+      leg.upper.rotation.x = -Math.max(CROUCH_HIP_BEND * load, hip);
+    }
+    this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, CROUCH_TORSO_LEAN * load);
+    this.visualRoot.position.y +=
+      legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) -
+      legStanceDrop(Math.max(CROUCH_HIP_BEND * load, hip), finalKnee);
+  }
 
-    const hop = Math.sin(clamp(t, 0, 1) * Math.PI) * FOLLOW_THROUGH_HOP_HEIGHT;
-    this.visualRoot.position.y += hop;
+  /**
+   * The airborne half: an actual jump off the floor with the legs tucked
+   * and both arms held extended overhead through the release and
+   * follow-through, landing at the end of the window. Real broadcast
+   * footage is unambiguous that this is where a jump shot's readability
+   * comes from - the shooter leaves the floor, and the arms stay up on
+   * the way down - where this project previously had the shooting arm
+   * snap straight back to the idle pose the instant the ball left the
+   * hand, with the player never leaving the ground at all.
+   *
+   * `t` runs 1 (just left the floor) down to 0 (landed). Entirely
+   * visual: the lift is applied to visualRoot the same way
+   * updateWalkCycle's bob/crouch offsets are, so the physics capsule,
+   * ball flight and character controller are all untouched.
+   */
+  updateShotAir(hand: 1 | -1, t: number): void {
+    const air = clamp(t, 0, 1);
+    const arc = Math.sin((1 - air) * Math.PI); // 0 at takeoff, 1 at apex, 0 on landing
+
+    for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
+      leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * arc);
+      leg.upper.rotation.x = -SHOT_AIR_HIP * arc;
+    }
+
+    // Both arms finish overhead - the guide hand comes up with the
+    // shooting hand on a real jump shot, it doesn't stay at the hip.
+    const shootDir = new THREE.Vector3(0, 1, SHOT_ARM_FORWARD).normalize();
+    const guideDir = new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize();
+    const shootArm = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
+    const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
+    shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
+    shootArm.lower.rotation.x = ELBOW_STRAIGHT;
+    guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);
+    guideArm.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - arc);
+
+    this.visualRoot.position.y += SHOT_JUMP_HEIGHT * arc;
   }
 
   /**
@@ -423,9 +512,16 @@ export class Player {
       chain.upper.quaternion.setFromUnitVectors(DOWN, localDir);
       chain.lower.rotation.x = GUARD_ELBOW_BEND;
     }
-    this.rig.legs.left.lower.rotation.x += GUARD_KNEE_BEND;
-    this.rig.legs.right.lower.rotation.x += GUARD_KNEE_BEND;
+    // A floor, not an addition: adding the stance on top of the walk
+    // cycle's own knee swing compounded mid-stride into a jerky
+    // over-bent leg, which is what made the guarding pose read as
+    // stumbling rather than sliding.
+    for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
+      leg.lower.rotation.x = Math.max(leg.lower.rotation.x, GUARD_KNEE_BEND);
+      leg.upper.rotation.x = leg.upper.rotation.x * 0.5 - GUARD_HIP_BEND;
+    }
     this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, GUARD_TORSO_LEAN);
+    this.visualRoot.position.y -= legStanceDrop(GUARD_HIP_BEND, GUARD_KNEE_BEND);
   }
 
   /** Copy the physics transform onto the render group. Call after each physics step. */
