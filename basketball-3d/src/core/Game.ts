@@ -36,9 +36,13 @@ function buildArenaGradient(): THREE.Texture {
   canvas.height = 256;
   const ctx = canvas.getContext('2d')!;
   const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, '#05070c');
-  gradient.addColorStop(0.55, '#0d1420');
-  gradient.addColorStop(1, '#232f42');
+  // Lifted off near-black. The top of the frame is the arena roof above
+  // the stands, and a real one is dim but never a void - at #05070c it
+  // read as a hole cut out of the picture, which pulled the whole shot
+  // down however bright the floor was.
+  gradient.addColorStop(0, '#131b2b');
+  gradient.addColorStop(0.55, '#1e2b42');
+  gradient.addColorStop(1, '#3b4c68');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const texture = new THREE.CanvasTexture(canvas);
@@ -97,7 +101,7 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.2;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // WebGLRenderer defaults to a 300x150 backing buffer until setSize is
@@ -158,9 +162,20 @@ export class Game {
   private setupSceneBasics(): void {
     const bg = buildArenaGradient();
     this.scene.background = bg;
-    this.scene.fog = new THREE.Fog(0x0d1420, 26, 68);
+    // Fog pushed well past the far baseline. At 26-68m it was swallowing
+    // the far half of a 28.6m court - the camera sits behind the player,
+    // so the opposite end is routinely 35m+ away and was fading into the
+    // fog colour. An arena is not a foggy place; this is only here to
+    // soften the very back of the bowl.
+    this.scene.fog = new THREE.Fog(0x16233a, 55, 150);
 
-    const hemi = new THREE.HemisphereLight(0x8fa6c9, 0x1a1410, 0.55);
+    // Carries almost all of the arena bowl - the stands get no direct
+    // light of their own, and at 0.55 with a near-black ground colour
+    // they sat at a measured luminance of 21/255, which is what made the
+    // whole scene read dark even though the floor itself was mid-tone.
+    // The ground colour is the light bouncing back off a lit hardwood
+    // floor, so it has no business being nearly black either.
+    const hemi = new THREE.HemisphereLight(0xa8c2e4, 0x4a4238, 1.35);
     this.scene.add(hemi);
 
     // key light
@@ -178,7 +193,7 @@ export class Game {
     this.scene.add(sun);
 
     // fill light, softening the key light's shadow side
-    const fill = new THREE.DirectionalLight(0x9db7ff, 0.35);
+    const fill = new THREE.DirectionalLight(0x9db7ff, 0.6);
     fill.position.set(-10, 10, -10);
     this.scene.add(fill);
 
@@ -195,15 +210,20 @@ export class Game {
     // visible specular highlight on the clearcoat hardwood (spec section
     // 19/21) - a flat court under directional light alone doesn't read as
     // "under stadium lights."
-    const rigPositions: Array<[number, number, number]> = [
-      [0, 9.5, 0],
-      [CD.length / 2 - 6, 8.5, 0],
-      [-(CD.length / 2 - 6), 8.5, 0],
-    ];
-    for (const [x, y, z] of rigPositions) {
-      const rig = new THREE.PointLight(0xfff6e0, 55, 24, 2);
-      rig.position.set(x, y, z);
-      this.scene.add(rig);
+    // Three lights in a line down the centre left the floor hot under
+    // each one and falling away everywhere else - with physical decay
+    // the illumination drops with the square of distance, so a single
+    // row cannot wash a 28.6m x 15.2m floor evenly. A real rig is a
+    // grid, so this is one too: two rows either side of the centre line,
+    // three along the length.
+    const rigZ = [-5, 5];
+    const rigX = [0, CD.length / 2 - 7, -(CD.length / 2 - 7)];
+    for (const x of rigX) {
+      for (const z of rigZ) {
+        const rig = new THREE.PointLight(0xfff6e0, 90, 42, 2);
+        rig.position.set(x, 10, z);
+        this.scene.add(rig);
+      }
     }
 
     // accent light tracking the controlled player - see fixedUpdate/update
