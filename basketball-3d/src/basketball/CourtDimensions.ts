@@ -37,7 +37,18 @@ export const CourtDimensions = {
     backboardThickness: 0.03,
     backboardBottomHeight: 9 * FT,
     backboardDistanceFromBaseline: 4 * FT,
-    poleSetback: 1 * FT + 8 * IN, // additional structure behind the board
+    /**
+     * Distance from the backboard's face back to the support column,
+     * i.e. how far the board is cantilevered out over the court.
+     *
+     * 8ft is the real figure, and it is a safety rule rather than a
+     * styling choice: with the board 4ft inside the baseline, it puts
+     * the column - and its padded base - a full 4ft BEHIND the baseline,
+     * off the playing floor entirely. The old 1ft 8in left the column
+     * standing at 44.7ft from centre, inside the 47ft baseline, so the
+     * stanchion was planted on the court itself.
+     */
+    poleSetback: 8 * FT,
     netHeight: 18 * IN, // official rule: "a white cord net 18 inches in length"
     restrictedAreaRadius: 4 * FT, // half-circle centered on the rim, closed by lines back to the backboard face
   },

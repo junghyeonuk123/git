@@ -274,7 +274,7 @@ export class Game {
       if (other === null) return;
       if (this.hoops.some((h) => h.rimCollider.handle === other)) {
         this.rules.notifyRimContact();
-      } else if (this.hoops.some((h) => h.poleCollider.handle === other)) {
+      } else if (this.hoops.some((h) => h.supportColliders.some((c) => c.handle === other))) {
         this.rules.notifyBasketSupportContact();
       }
     });
