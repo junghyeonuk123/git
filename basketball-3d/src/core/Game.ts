@@ -359,7 +359,7 @@ export class Game {
         // section 26: ball/hand IK), and pumps the body with the bounce
         // so the player is visibly pushing the ball down rather than
         // walking alongside it.
-        this.player.updateDribbleArm(this.playerController.hand, this.ball.position);
+        this.player.updateDribbleArm(this.playerController.hand, this.ball.position, this.ball.linearVelocity.y);
       }
     } else if (this.shotAirElapsed >= 0) {
       this.shotAirElapsed += dt;

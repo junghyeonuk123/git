@@ -13,8 +13,17 @@ const UP = new THREE.Vector3(0, 1, 0);
 const HAND_TARGET = new THREE.Vector3();
 /** Scratch + geometry for the hand anchor: out to the side of the hip, and a little in front of it. */
 const HAND_OFFSET = new THREE.Vector3();
-const HAND_SIDE_OFFSET = 0.32;
-const HAND_FORWARD_OFFSET = 0.22;
+/**
+ * Widened from 0.32/0.22, which tucked the ball against the hip - almost
+ * directly under the shoulder. From there the arm points straight down
+ * whatever the ball is doing, so the dribbling arm never visibly moved
+ * no matter what the stroke did to it. A real handler keeps the ball
+ * outside the hip and slightly ahead, which is also the only way the
+ * reach reads from a camera sitting behind the player: shoulder
+ * abduction is visible from behind, fore/aft elbow swing is not.
+ */
+const HAND_SIDE_OFFSET = 0.44;
+const HAND_FORWARD_OFFSET = 0.3;
 const DOWN = new THREE.Vector3(0, -1, 0);
 
 /** A two-segment limb: `upper` is the hip/shoulder pivot, `lower` (its child) is the knee/elbow pivot. */
@@ -260,10 +269,29 @@ const CROUCH_LAMBDA = 8; // how fast the stance blends in/out
  * arm hanging straight down at the court every bounce, so the ball read
  * as being escorted to the floor rather than bounced off it.
  */
-const DRIBBLE_HAND_FLOOR = 0.58; // meters above the court the pushing hand bottoms out at
-const DRIBBLE_HAND_TOP = 0.85; // ball height the hand is considered fully "up" at, for the pump blend
-const DRIBBLE_PUMP_RISE = 0.035; // meters the body extends upward as the ball comes back up
-const DRIBBLE_PUMP_LEAN = 0.09; // radians of extra torso lean at the bottom of the push
+/**
+ * The top of the dribble pocket: the ball height at which the hand is
+ * considered to have met the ball and the stroke starts over. Matched
+ * to DribblePhysicsConfig's dribbleHeightNormal, because the ball
+ * genuinely has to come back up to where the hand can be. This rig's
+ * shoulder sits at SHOULDER_HEIGHT with an arm of ARM_LENGTH, so a
+ * straight-down hand reaches about 1.0m - a pocket below that is a
+ * pocket the hand physically cannot get to, which is exactly why the
+ * old 0.66m pocket looked the way it did: the ball hovered around the
+ * player's shin while the arms hung dead straight at their sides,
+ * because there was no reachable ball for them to move toward.
+ */
+const DRIBBLE_POCKET_TOP = 0.95;
+/** Ball height by which the hand has driven all the way through the push. */
+const DRIBBLE_STROKE_BOTTOM = 0.72;
+/** Hand height at the top of the pocket (receiving the ball) and at the bottom of the push. */
+const DRIBBLE_HAND_HIGH = 0.98;
+const DRIBBLE_HAND_LOW = 0.68;
+/** Elbow angles across the stroke: cocked at the top of the pocket, driven through at the bottom. */
+const DRIBBLE_ELBOW_COCKED = 1.05;
+const DRIBBLE_ELBOW_DRIVEN = 0.12;
+const DRIBBLE_PUMP_RISE = 0.075; // meters the body extends upward as the ball comes back up
+const DRIBBLE_PUMP_LEAN = 0.11; // radians of extra torso lean at the bottom of the push
 
 /** Elbow bend heuristic for pointArmAtBall - see that method for why this isn't full 2-bone IK. */
 const ELBOW_STRAIGHT = 0.1;
@@ -528,18 +556,45 @@ export class Player {
    *
    * Call after updateWalkCycle, same as pointArmAtBall.
    */
-  updateDribbleArm(hand: 1 | -1, ballWorldPos: THREE.Vector3): void {
+  updateDribbleArm(hand: 1 | -1, ballWorldPos: THREE.Vector3, ballVerticalSpeed: number): void {
     const ground = this.groundY;
-    const handY = Math.max(ballWorldPos.y, ground + DRIBBLE_HAND_FLOOR);
-    HAND_TARGET.set(ballWorldPos.x, handY, ballWorldPos.z);
+    const ballHeight = ballWorldPos.y - ground;
+
+    // The stroke has to be keyed to the ball's PHASE, not just its
+    // height, because a given height happens twice a bounce and the hand
+    // is doing opposite things each time. On the way down the hand is
+    // driving through the push; on the way up it is lifting back to the
+    // top of the pocket to receive the ball. Height alone saturated
+    // almost immediately (the ball spends most of its travel below the
+    // pocket), which left the arm pinned at full extension for the whole
+    // bounce - it looked exactly like an arm hanging at the player's
+    // side, because that is what it was.
+    const stroke =
+      ballVerticalSpeed < 0
+        ? clamp((DRIBBLE_POCKET_TOP - ballHeight) / (DRIBBLE_POCKET_TOP - DRIBBLE_STROKE_BOTTOM), 0, 1)
+        : 1 - clamp(ballHeight / DRIBBLE_POCKET_TOP, 0, 1);
+
+    // The shoulder aims along the stroke rather than at the ball itself:
+    // once the ball is below the pocket it is airborne and out of the
+    // hand, so following it to the floor would be reaching, not
+    // dribbling.
+    const aimY = ground + THREE.MathUtils.lerp(DRIBBLE_HAND_HIGH, DRIBBLE_HAND_LOW, stroke);
+    HAND_TARGET.set(ballWorldPos.x, aimY, ballWorldPos.z);
     this.pointArmAtBall(hand, HAND_TARGET);
 
-    // 0 with the ball up at the top of the bounce, 1 at full push-down.
-    const push = 1 - clamp((handY - ground - DRIBBLE_HAND_FLOOR) / (DRIBBLE_HAND_TOP - DRIBBLE_HAND_FLOOR), 0, 1);
+    // pointArmAtBall picks the elbow from how far away the ball is,
+    // which over a dribble's narrow range of distances never changes -
+    // the arm stayed rigid for the whole bounce. The stroke is what
+    // should be driving it: cocked as the hand takes the ball, straight
+    // as it drives through. This is the single most visible part of a
+    // dribble and it was simply absent.
+    const chain = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
+    chain.lower.rotation.x = THREE.MathUtils.lerp(DRIBBLE_ELBOW_COCKED, DRIBBLE_ELBOW_DRIVEN, stroke);
+
     // Rise on the way up rather than sinking on the way down, so the
     // shoes never get pushed through the court on the push-down half.
-    this.visualRoot.position.y += (1 - push) * DRIBBLE_PUMP_RISE;
-    this.rig.torsoPivot.rotation.x += push * DRIBBLE_PUMP_LEAN;
+    this.visualRoot.position.y += (1 - stroke) * DRIBBLE_PUMP_RISE;
+    this.rig.torsoPivot.rotation.x += stroke * DRIBBLE_PUMP_LEAN;
   }
 
   /**

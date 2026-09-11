@@ -12,21 +12,45 @@ export const DribblePhysicsConfig = {
    * height the ball is driven back up to, and where the hand waits for
    * it. Low and tight while sprinting (ball security over control),
    * higher and more relaxed while set in triple threat.
+   *
+   * These were previously 0.5/0.66/0.76, which put the ball's apex down
+   * around the player's shin. The rig's shoulder is at 1.55m with a
+   * 0.5m arm, so the hand cannot get below about 1.0m without the whole
+   * body folding - meaning the ball was bouncing somewhere the hand was
+   * never going to reach, and the arms just hung at the player's sides
+   * through the entire dribble. Hip height is both what real footage
+   * shows and what leaves the hand a stroke to make.
    */
-  dribbleHeightLow: 0.5, // sprint dribble
-  dribbleHeightNormal: 0.66, // walking/standard dribble
-  dribbleHeightHigh: 0.76, // triple-threat, more control
+  dribbleHeightLow: 0.78, // sprint dribble - lower and faster, which also shortens the cycle the ball is out of reach for
+  dribbleHeightNormal: 0.9, // walking/standard dribble - hip height, where a hand actually is
+  dribbleHeightHigh: 1.0, // triple-threat, more control
 
   /**
    * How far (meters, horizontally) the hand can be from the ball and
    * still get a push on it. Beyond this the player simply misses the
    * ball this cycle and it keeps bouncing wherever its own momentum was
    * already taking it - which is the entire point of the rewrite.
+   *
+   * Widened alongside the raised pocket: a hip-high bounce keeps the
+   * ball airborne and untouchable for longer than a knee-high one, so
+   * the same cut opens a bigger gap before the hand gets another
+   * chance at it. Measured gap through a successful cut peaks around
+   * 1.27m.
    */
-  handReach: 1.4,
+  handReach: 1.75,
 
   /** The ball must be at least this high to be pushable - below it the hand has nothing to push against. */
   minPushHeight: 0.17,
+
+  /**
+   * Spin imparted at the push, rad/s, on top of whatever rolling the
+   * ball's travel implies. The hand comes over the top of the ball, so a
+   * dribbled ball is always turning even on the spot - and a ball with
+   * visible seams that does not turn reads as a prop being carried
+   * rather than an object being handled. Measured at 0.25 rad/s (i.e.
+   * none at all) during a standing dribble before this existed.
+   */
+  pushSpin: 14,
 
   /** Only push once the ball has stopped rising (m/s of upward velocity still tolerated), i.e. as it settles into the pocket. */
   apexWindow: 0.3,
@@ -96,5 +120,5 @@ export const DribblePhysicsConfig = {
    * ball and still be holding it - the "pet following the player" look
    * in its purest form. Generous enough that ordinary cuts recover.
    */
-  loseDistance: 2.6,
+  loseDistance: 3.0,
 } as const;

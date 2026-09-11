@@ -162,14 +162,29 @@ export class DribbleSystem {
     const closeX = (this.predictedHand.x - ballPos.x) / cycle - travelVx;
     const closeZ = (this.predictedHand.z - ballPos.z) / cycle - travelVz;
 
-    this.ball.body.setLinvel(
-      {
-        x: travelVx + THREE.MathUtils.clamp(closeX, -CFG.maxRecenter, CFG.maxRecenter),
-        y: -push,
-        z: travelVz + THREE.MathUtils.clamp(closeZ, -CFG.maxRecenter, CFG.maxRecenter),
-      },
-      true,
-    );
+    const vx = travelVx + THREE.MathUtils.clamp(closeX, -CFG.maxRecenter, CFG.maxRecenter);
+    const vz = travelVz + THREE.MathUtils.clamp(closeZ, -CFG.maxRecenter, CFG.maxRecenter);
+    this.ball.body.setLinvel({ x: vx, y: -push, z: vz }, true);
+
+    // The hand comes over the top of the ball, so it always leaves the
+    // hand turning - forward along the direction of travel, and about
+    // the player's own facing when dribbling on the spot. Without this
+    // a standing dribble measured 0.25 rad/s, i.e. a seamed ball that
+    // never rotated at all, which is most of why it read as a prop
+    // being carried rather than an object being handled.
+    const speed = Math.hypot(vx, vz);
+    let axisX: number;
+    let axisZ: number;
+    if (speed > 0.2) {
+      axisX = -vz / speed;
+      axisZ = vx / speed;
+    } else {
+      const facing = this.player.facingDirection; // topspin about the player's own right
+      axisX = -facing.z;
+      axisZ = facing.x;
+    }
+    const spin = Math.max(CFG.pushSpin, speed / CD.ball.radius);
+    this.ball.body.setAngvel({ x: axisX * spin, y: 0, z: axisZ * spin }, true);
     return false;
   }
 
