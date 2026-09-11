@@ -50,7 +50,7 @@ export const DribblePhysicsConfig = {
    * rather than an object being handled. Measured at 0.25 rad/s (i.e.
    * none at all) during a standing dribble before this existed.
    */
-  pushSpin: 14,
+  pushSpin: 8,
 
   /** Only push once the ball has stopped rising (m/s of upward velocity still tolerated), i.e. as it settles into the pocket. */
   apexWindow: 0.3,
@@ -60,6 +60,16 @@ export const DribblePhysicsConfig = {
 
   /** Seconds between pushes, so one contact can't fire on consecutive steps. */
   pushCooldown: 0.15,
+
+  /**
+   * Gap (meters) within which the ball counts as sitting in the pocket.
+   * Outside it the handler is recovering a ball that got away, and takes
+   * the first moment the hand can touch it rather than waiting for the
+   * bounce's usual rhythm - waiting costs a whole cycle, and at speed a
+   * whole cycle is several metres, so a single missed push used to
+   * strand the ball beyond saving.
+   */
+  pocketGap: 0.6,
 
   /**
    * Change in the handler's intended velocity (m/s) that counts as
@@ -86,8 +96,13 @@ export const DribblePhysicsConfig = {
    * arming it and taking the first chance that comes, rather than
    * demanding the two coincide, is the difference between the drive
    * working and the ball being abandoned.
+   *
+   * Sized to cover a whole bounce. At a sprint the ball can be down on
+   * the floor and untouchable for most of a cycle, so a shorter window
+   * simply expired before the hand ever got a chance - which is what
+   * made a full-speed reversal drop the ball every time.
    */
-  cutPushWindow: 0.3,
+  cutPushWindow: 0.55,
 
   /**
    * Effective ball/court bounce, used to work out how hard to push so
@@ -97,6 +112,12 @@ export const DribblePhysicsConfig = {
    * self-corrects on the very next push rather than accumulating.
    */
   floorRestitution: 0.6,
+
+  /** How fast the measured bounce time replaces the previous estimate, 0..1 per bounce. */
+  cycleLearnRate: 0.5,
+
+  /** Damping rate for the pocket's lead direction - how fast the lead swings round to a new heading. */
+  leadLambda: 9,
 
   /** Clamps on the downward push, m/s. */
   minPushSpeed: 1.6,
@@ -118,7 +139,15 @@ export const DribblePhysicsConfig = {
    * Horizontal distance (meters) at which the handler has simply lost
    * the ball. Without this the player could stroll away from a bouncing
    * ball and still be holding it - the "pet following the player" look
-   * in its purest form. Generous enough that ordinary cuts recover.
+   * in its purest form.
+   *
+   * Deliberately only a little beyond handReach. The gap between the two
+   * is a dead zone where the hand cannot get to the ball but the player
+   * still nominally has it, so nothing pushes it and nothing chases it -
+   * and a ball stranded a metre or two back just stayed stranded while
+   * the player ran on. Keeping the zone short means the outcome is
+   * always one of the two honest ones: the hand recovers the ball, or it
+   * is a live loose ball and the player has to go and get it.
    */
-  loseDistance: 3.0,
+  loseDistance: 2.25,
 } as const;

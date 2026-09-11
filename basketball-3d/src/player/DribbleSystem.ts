@@ -61,6 +61,21 @@ export class DribbleSystem {
   private prevTargetVx = 0;
   private prevTargetVz = 0;
   private cutArmed = 0;
+  /**
+   * Seconds the last complete bounce actually took, hand to hand.
+   *
+   * The push has to aim at where the pocket will be when the ball gets
+   * back to it, which means knowing how long that will take. Deriving
+   * that from CFG.floorRestitution is a guess, and the error does not
+   * stay small: the ball simply arrives early or late, and at walking
+   * pace a tenth of a second of error is a third of a metre of drift
+   * per bounce, every bounce, always in the same direction. Measuring
+   * the real round trip closes the loop - whatever Rapier's collision
+   * actually does with the ball is what the next push is aimed with.
+   */
+  private measuredCycle = 0;
+  /** Smoothed travel velocity, used only to orient and size the pocket's forward lead - see Player.getDribbleHandPosition. */
+  private readonly leadVelocity = new THREE.Vector2(0, 0);
   private readonly handPos = new THREE.Vector3();
   private readonly predictedHand = new THREE.Vector3();
 
@@ -89,7 +104,12 @@ export class DribbleSystem {
     this.pushCooldown = Math.max(0, this.pushCooldown - dt);
     this.cutArmed = Math.max(0, this.cutArmed - dt);
     this.debugContactTimer += dt;
-    this.player.getHandPosition(this.handPos, hand, height);
+
+    const live = playerVelocity ?? ZERO_VELOCITY;
+    const blend = 1 - Math.exp(-CFG.leadLambda * dt);
+    this.leadVelocity.x += (live.x - this.leadVelocity.x) * blend;
+    this.leadVelocity.y += (live.y - this.leadVelocity.y) * blend;
+    this.player.getDribbleHandPosition(this.handPos, hand, height, live, this.leadVelocity, 0);
 
     const ballPos = this.ball.position;
     const floorY = CD.ball.radius;
@@ -119,8 +139,30 @@ export class DribbleSystem {
     const abovePocket = ballPos.y > this.handPos.y + CFG.pocketWindow;
     const tooLow = ballPos.y < floorY + CFG.minPushHeight;
     const outOfReach = gap > CFG.handReach;
+    // The hand being able to physically get to the ball is the one gate
+    // nothing overrides.
     if (tooLow || outOfReach) return false;
-    if (!cutting && (this.pushCooldown > 0 || stillRising || abovePocket)) return false;
+    const recovering = gap > CFG.pocketGap;
+    if (cutting) {
+      // A cut puts a hand on the ball at the first chance it gets.
+    } else if (recovering) {
+      // Corralling a ball that got away: take it whenever it can be
+      // touched, rather than waiting for the pocket's rhythm.
+      if (this.pushCooldown > 0) return false;
+    } else if (this.pushCooldown > 0 || stillRising || abovePocket) {
+      return false;
+    }
+
+    // Time the bounce that just finished, before resetting the clock.
+    // Only full rhythm-driven bounces count: a cut or a recovery push
+    // deliberately interrupts the cycle, so timing one would teach the
+    // predictor a round trip that never happened.
+    if (!cutting && !recovering && this.debugContactTimer > 0.15 && this.debugContactTimer < 1.2) {
+      this.measuredCycle =
+        this.measuredCycle > 0
+          ? THREE.MathUtils.lerp(this.measuredCycle, this.debugContactTimer, CFG.cycleLearnRate)
+          : this.debugContactTimer;
+    }
 
     this.pushCooldown = CFG.pushCooldown;
     this.cutArmed = 0;
@@ -140,10 +182,12 @@ export class DribbleSystem {
     const push = THREE.MathUtils.clamp(Math.sqrt(Math.max(0, pushSq)), CFG.minPushSpeed, CFG.maxPushSpeed);
     this.debugPushSpeed = push;
 
-    // How long this push takes to come back to the hand - the window the
-    // recentering nudge has to work with.
+    // How long this push takes to come back to the hand. The analytic
+    // value is only the opening guess, used until a real bounce has been
+    // timed; after that the measured round trip wins.
     const arrival = Math.sqrt(push * push + 2 * this.gravity * ballHeight);
-    const cycle = (arrival - push) / this.gravity + (e * arrival) / this.gravity;
+    const predicted = (arrival - push) / this.gravity + (e * arrival) / this.gravity;
+    const cycle = this.measuredCycle > 0 ? this.measuredCycle : predicted;
 
     // Aim at where the hand will actually be one bounce from now, which
     // is the body's travel AND the swing the hand makes around it as the
@@ -152,13 +196,7 @@ export class DribbleSystem {
     // gap" is what lets the second half be capped hard: the ball is
     // moved by the player's own motion, never hauled along by a
     // correction term.
-    this.player.getPredictedHandPosition(
-      this.predictedHand,
-      hand,
-      height,
-      playerVelocity ?? ZERO_VELOCITY,
-      cycle,
-    );
+    this.player.getDribbleHandPosition(this.predictedHand, hand, height, live, this.leadVelocity, cycle);
     const closeX = (this.predictedHand.x - ballPos.x) / cycle - travelVx;
     const closeZ = (this.predictedHand.z - ballPos.z) / cycle - travelVz;
 
@@ -166,22 +204,35 @@ export class DribbleSystem {
     const vz = travelVz + THREE.MathUtils.clamp(closeZ, -CFG.maxRecenter, CFG.maxRecenter);
     this.ball.body.setLinvel({ x: vx, y: -push, z: vz }, true);
 
-    // The hand comes over the top of the ball, so it always leaves the
-    // hand turning - forward along the direction of travel, and about
-    // the player's own facing when dribbling on the spot. Without this
-    // a standing dribble measured 0.25 rad/s, i.e. a seamed ball that
-    // never rotated at all, which is most of why it read as a prop
-    // being carried rather than an object being handled.
+    // The hand comes over the top of the ball, so it leaves the hand
+    // rolling FORWARD. Two things ride on getting this sign right.
+    //
+    // Visually, a seamed ball that does not rotate reads as a prop being
+    // carried rather than an object being handled - it measured 0.25
+    // rad/s before any spin was set at all.
+    //
+    // Physically, it decides whether the bounce keeps the ball's speed
+    // or eats it. Rolling spin puts the contact point at rest against
+    // the floor, so there is almost no tangential impulse. The opposite
+    // sign drags the contact point forward across the floor at speed and
+    // friction answers with a big backward impulse: measured, a ball
+    // pushed out at 5.5 m/s came off the floor at 0.9 m/s. That is the
+    // ball being put down in front and then left behind by its own
+    // bounce, which no amount of aiming the push further ahead can fix.
+    //
+    // Rolling in +X means spinning about -Z (the contact point travels
+    // backward relative to the centre), so the axis is (v.z, 0, -v.x) -
+    // the exact negation of the backspin axis a shot uses.
     const speed = Math.hypot(vx, vz);
     let axisX: number;
     let axisZ: number;
     if (speed > 0.2) {
-      axisX = -vz / speed;
-      axisZ = vx / speed;
+      axisX = vz / speed;
+      axisZ = -vx / speed;
     } else {
-      const facing = this.player.facingDirection; // topspin about the player's own right
-      axisX = -facing.z;
-      axisZ = facing.x;
+      const facing = this.player.facingDirection; // roll forward along the player's own facing
+      axisX = facing.z;
+      axisZ = -facing.x;
     }
     const spin = Math.max(CFG.pushSpin, speed / CD.ball.radius);
     this.ball.body.setAngvel({ x: axisX * spin, y: 0, z: axisZ * spin }, true);

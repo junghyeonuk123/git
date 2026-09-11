@@ -24,6 +24,14 @@ const HAND_OFFSET = new THREE.Vector3();
  */
 const HAND_SIDE_OFFSET = 0.44;
 const HAND_FORWARD_OFFSET = 0.3;
+/**
+ * Seconds of travel the dribble pocket is pushed ahead of the player,
+ * i.e. the pocket leads by this times the player's speed. At a walk
+ * (3.2 m/s) that is about 0.45m of lead on top of HAND_FORWARD_OFFSET,
+ * at a sprint (6.2 m/s) about 0.87m - the ball is genuinely put down in
+ * front and run onto, rather than bounced at the hip and left behind.
+ */
+const DRIBBLE_LEAD_PER_SPEED = 0.14;
 const DOWN = new THREE.Vector3(0, -1, 0);
 
 /** A two-segment limb: `upper` is the hip/shoulder pivot, `lower` (its child) is the knee/elbow pivot. */
@@ -746,33 +754,52 @@ export class Player {
   }
 
   /**
-   * Where getHandPosition will be in `seconds`, assuming the player
-   * carries on at `velocity` and finishes turning to face it.
+   * The dribble pocket - where the ball should be bounced - either right
+   * now (`seconds` = 0) or `seconds` into the future, assuming the
+   * player carries on at `velocity` and turns to face it.
    *
-   * The dribble needs this because a push has to land the ball where the
-   * hand will be a whole bounce from now, and the hand does not simply
+   * Two things separate this from getHandPosition, and both of them are
+   * why a drive used to leave the ball behind:
+   *
+   * The pocket LEADS the player, by more the faster they are going. A
+   * handler at speed does not bounce the ball beside their hip - they
+   * push it out in front and run onto it, which is the only way to move
+   * quickly without the ball being left behind, because the ball is
+   * untouchable for most of every bounce and the player covers real
+   * ground in that time. With a fixed 0.3m offset the ball was being
+   * put down level with the hip and the player simply outran it.
+   *
+   * And it is predictive: a push has to land the ball where the hand
+   * will be a whole bounce from now, and the hand does not just
    * translate with the body - it swings around it as the player turns,
-   * by up to half a metre through a 90-degree cut. Aiming at the hand's
-   * present position ignored that swing entirely, so starting a drive
-   * (which is a turn AND an acceleration at once) put the ball out of
-   * reach inside a single bounce and the dribble was dropped on the
-   * spot.
+   * by up to half a metre through a 90-degree cut.
    */
-  getPredictedHandPosition(
+  getDribbleHandPosition(
     out: THREE.Vector3,
     side: number,
     heightAboveGround: number,
-    velocity: THREE.Vector2,
+    travelVelocity: THREE.Vector2,
+    leadVelocity: THREE.Vector2,
     seconds: number,
   ): THREE.Vector3 {
     const p = this.position;
-    const moving = velocity.lengthSq() > 1e-6;
-    const yaw = moving ? Math.atan2(velocity.x, velocity.y) : this.facingYaw; // .y stores world Z
-    HAND_OFFSET.set(side * HAND_SIDE_OFFSET, 0, HAND_FORWARD_OFFSET).applyAxisAngle(UP, yaw);
+    // Two different velocities doing two different jobs, and conflating
+    // them breaks one or the other. `travelVelocity` is where the player
+    // is going, and is what the body's position `seconds` from now is
+    // extrapolated from - it has to be the live value or a drive puts
+    // the ball down behind the player. `leadVelocity` only orients and
+    // sizes the lead, and is deliberately a smoothed version: the raw
+    // direction flips the instant the stick does, which whipped the
+    // pocket - lead and all - clean across the body in a single step and
+    // left it a metre and a half from where the ball actually was.
+    const leadSpeed = leadVelocity.length();
+    const yaw = leadSpeed > 1e-3 ? Math.atan2(leadVelocity.x, leadVelocity.y) : this.facingYaw; // .y stores world Z
+    const lead = HAND_FORWARD_OFFSET + DRIBBLE_LEAD_PER_SPEED * leadSpeed;
+    HAND_OFFSET.set(side * HAND_SIDE_OFFSET, 0, lead).applyAxisAngle(UP, yaw);
     return out.set(
-      p.x + velocity.x * seconds + HAND_OFFSET.x,
+      p.x + travelVelocity.x * seconds + HAND_OFFSET.x,
       this.groundY + heightAboveGround,
-      p.z + velocity.y * seconds + HAND_OFFSET.z,
+      p.z + travelVelocity.y * seconds + HAND_OFFSET.z,
     );
   }
 }
