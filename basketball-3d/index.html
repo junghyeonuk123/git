@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Basketball 3D</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="scoreboard">
+        <div id="score-value">0</div>
+        <div id="scoreboard-clock">
+          <div id="quarter-value">Q1</div>
+          <div id="game-clock-value">12:00</div>
+        </div>
+        <div id="shot-clock-value">24</div>
+      </div>
+      <div id="event-banner"></div>
+      <div id="pickup-indicator" hidden>PICK UP</div>
+
+      <div id="shot-meter" hidden>
+        <div id="shot-meter-track">
+          <div class="shot-meter-zone" data-zone="weak"></div>
+          <div class="shot-meter-zone" data-zone="swish"></div>
+          <div class="shot-meter-zone" data-zone="bank"></div>
+          <div class="shot-meter-zone" data-zone="strong"></div>
+          <div id="shot-meter-pointer"></div>
+        </div>
+        <div id="shot-meter-label"></div>
+      </div>
+
+      <div id="loading-screen">
+        <div class="loading-title">BASKETBALL 3D</div>
+        <div class="loading-bar"><div id="loading-bar-fill"></div></div>
+        <div id="loading-status">Loading…</div>
+      </div>
+      <div id="debug-panel" hidden></div>
+      <div id="hint">
+        WASD move &middot; Shift sprint &middot; F shoot &middot; E pass &middot; Q crossover &middot; C hesitation
+        &middot; V step-back &middot; X in-and-out &middot; Z legs-through &middot; F1 debug
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

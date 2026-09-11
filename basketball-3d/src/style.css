@@ -1,0 +1,293 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #05070a;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#loading-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #05070a;
+  color: #f4f6fb;
+  z-index: 20;
+  transition: opacity 0.4s ease;
+}
+
+#loading-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.loading-bar {
+  width: 260px;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+#loading-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: #e8621a;
+  transition: width 0.2s ease;
+}
+
+#loading-status {
+  font-size: 12px;
+  color: #8d9ab3;
+  letter-spacing: 0.06em;
+}
+
+#debug-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 10px 12px;
+  background: rgba(5, 7, 10, 0.7);
+  color: #b7f7c1;
+  font: 12px/1.5 ui-monospace, 'SF Mono', Menlo, monospace;
+  border-radius: 6px;
+  white-space: pre;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#scoreboard {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 22px;
+  background: rgba(8, 10, 15, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #f4f6fb;
+  font-variant-numeric: tabular-nums;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#score-value {
+  font-size: 26px;
+  font-weight: 700;
+  min-width: 2.2em;
+  text-align: center;
+}
+
+#scoreboard-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.25;
+}
+
+#quarter-value {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: #8d9ab3;
+}
+
+#game-clock-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+#shot-clock-value {
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 1.6em;
+  text-align: center;
+  color: #e8621a;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+#shot-clock-value.urgent {
+  color: #ef4444;
+}
+
+#event-banner {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  padding: 8px 20px;
+  background: rgba(232, 98, 26, 0.9);
+  color: #0d1018;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 8px;
+  opacity: 0;
+  z-index: 10;
+  pointer-events: none;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
+}
+
+#event-banner.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+#event-banner.violation {
+  background: rgba(239, 68, 68, 0.92);
+  color: #f4f6fb;
+}
+
+/* Only ever shown when LooseBallRecovery.isRecoverable() is true this frame - see PickupIndicator.ts. */
+#pickup-indicator {
+  position: absolute;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 18px;
+  background: rgba(46, 204, 113, 0.92);
+  color: #0d1018;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  border-radius: 8px;
+  z-index: 10;
+  pointer-events: none;
+  animation: pickup-pulse 1s ease-in-out infinite;
+}
+
+#pickup-indicator[hidden] {
+  display: none;
+}
+
+@keyframes pickup-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+#shot-meter {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* A same-specificity `display` rule on the id selector above would beat
+   the UUA stylesheet's [hidden]{display:none}, so it has to be undone
+   explicitly here rather than relying on the attribute alone. */
+#shot-meter[hidden] {
+  display: none;
+}
+
+#shot-meter-track {
+  position: relative;
+  width: 26px;
+  height: 260px;
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid rgba(244, 246, 251, 0.55);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Flex-grow is proportional to each zone's width on the 0..METER_CAP
+   scale (see ShootingSystem.ts's ZONE_* constants) - weak 0.62, swish
+   0.08, bank 0.1, strong 0.35 - so the bar's bands actually line up
+   with the release windows the shooting logic uses. */
+.shot-meter-zone[data-zone='weak'] {
+  flex-grow: 62;
+  background: #5b6472;
+}
+.shot-meter-zone[data-zone='swish'] {
+  flex-grow: 8;
+  background: #2ecc71;
+}
+.shot-meter-zone[data-zone='bank'] {
+  flex-grow: 10;
+  background: #3498db;
+}
+.shot-meter-zone[data-zone='strong'] {
+  flex-grow: 35;
+  background: #e74c3c;
+}
+
+#shot-meter-pointer {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  height: 4px;
+  background: #f4f6fb;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+  bottom: 0%;
+  transition: bottom 0.03s linear;
+}
+
+#shot-meter-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f4f6fb;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  min-height: 1.2em;
+}
+
+#hint {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(244, 246, 251, 0.65);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  z-index: 10;
+  pointer-events: none;
+}
