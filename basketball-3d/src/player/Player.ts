@@ -239,6 +239,22 @@ function shotDipAmount(elapsedSeconds: number): number {
   return Math.max(0, 1 - extendT);
 }
 
+/**
+ * Elbows fold FORWARD. A forearm cannot swing out behind the upper arm,
+ * and this rig makes that easy to get wrong: limbs hang along -Y, so a
+ * POSITIVE rotation.x swings a limb backward. That is exactly right for
+ * a knee (the shin folds back underneath, which is why the leg code uses
+ * positive), and exactly wrong for an elbow - every elbow in this file
+ * was positive, so the forearms were kinking back toward the torso, most
+ * visibly on the dribbling arm.
+ *
+ * Every elbow angle here stays a positive "how far is it bent"
+ * magnitude; this is the single place the anatomy is applied.
+ */
+function setElbow(chain: LimbChain, bend: number): void {
+  chain.lower.rotation.x = -bend;
+}
+
 /** Tunables for the procedural walk-cycle animation. */
 const WALK_STRIDE_LENGTH = 1.6; // meters of travel per full gait cycle
 const WALK_LEG_AMPLITUDE = 0.55; // radians, hip swing
@@ -501,8 +517,8 @@ export class Player {
 
     this.rig.arms.left.upper.rotation.x = -swing * WALK_ARM_AMPLITUDE_RATIO;
     this.rig.arms.right.upper.rotation.x = swing * WALK_ARM_AMPLITUDE_RATIO;
-    this.rig.arms.left.lower.rotation.x = ARM_ELBOW_REST_BEND;
-    this.rig.arms.right.lower.rotation.x = ARM_ELBOW_REST_BEND;
+    setElbow(this.rig.arms.left, ARM_ELBOW_REST_BEND);
+    setElbow(this.rig.arms.right, ARM_ELBOW_REST_BEND);
 
     const bob = Math.abs(Math.sin(this.walkPhase * 2)) * WALK_BOB_AMPLITUDE * swingStrength;
     // subtle idle breathing sway so the character doesn't look frozen when standing still
@@ -546,7 +562,7 @@ export class Player {
     chain.upper.quaternion.setFromUnitVectors(DOWN, dirLocal);
 
     const reach = clamp((dist / ARM_LENGTH - 0.35) / 0.65, 0, 1);
-    chain.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_BENT, ELBOW_STRAIGHT, reach);
+    setElbow(chain, THREE.MathUtils.lerp(ELBOW_BENT, ELBOW_STRAIGHT, reach));
   }
 
   /**
@@ -597,7 +613,7 @@ export class Player {
     // as it drives through. This is the single most visible part of a
     // dribble and it was simply absent.
     const chain = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
-    chain.lower.rotation.x = THREE.MathUtils.lerp(DRIBBLE_ELBOW_COCKED, DRIBBLE_ELBOW_DRIVEN, stroke);
+    setElbow(chain, THREE.MathUtils.lerp(DRIBBLE_ELBOW_COCKED, DRIBBLE_ELBOW_DRIVEN, stroke));
 
     // Rise on the way up rather than sinking on the way down, so the
     // shoes never get pushed through the court on the push-down half.
@@ -674,9 +690,9 @@ export class Player {
     const shootArm = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
     const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
     shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
-    shootArm.lower.rotation.x = ELBOW_STRAIGHT;
+    setElbow(shootArm, ELBOW_STRAIGHT);
     guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);
-    guideArm.lower.rotation.x = THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - air);
+    setElbow(guideArm, THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - air));
 
     this.visualRoot.position.y += height;
   }
@@ -696,7 +712,7 @@ export class Player {
       const chain = side === 1 ? this.rig.arms.right : this.rig.arms.left;
       const localDir = new THREE.Vector3(side * GUARD_ARM_SPREAD, -1, 0.15).normalize();
       chain.upper.quaternion.setFromUnitVectors(DOWN, localDir);
-      chain.lower.rotation.x = GUARD_ELBOW_BEND;
+      setElbow(chain, GUARD_ELBOW_BEND);
     }
     // A floor, not an addition: adding the stance on top of the walk
     // cycle's own knee swing compounded mid-stride into a jerky
