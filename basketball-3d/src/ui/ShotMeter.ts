@@ -29,6 +29,9 @@ export class ShotMeter {
 
     const frac = clamp(shooting.meter / METER_CAP, 0, 1);
     this.pointer.style.bottom = `${frac * 100}%`;
-    this.label.textContent = ZONE_LABELS[classifyMeter(shooting.meter)] ?? '';
+    // A layup or a dunk has no release window to aim for, so grading it
+    // against the zones would be meaningless - name the finish instead.
+    this.label.textContent =
+      shooting.style === 'jumper' ? (ZONE_LABELS[classifyMeter(shooting.meter)] ?? '') : shooting.style.toUpperCase();
   }
 }

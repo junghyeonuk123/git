@@ -9,7 +9,8 @@ import { Crowd } from '@/environment/Crowd';
 import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
-import { Player, SHOT_LANDING_SECONDS } from '@/player/Player';
+import { Player } from '@/player/Player';
+import { SHOT_LEAPS, shotLandingSeconds, type ShotLeap, type ShotStyle } from '@/player/ShotStyles';
 import { PlayerController } from '@/player/PlayerController';
 import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { DefenderAI } from '@/ai/DefenderAI';
@@ -86,6 +87,9 @@ export class Game {
    */
   private shotAirElapsed = -1;
   private shotAirHand: 1 | -1 = 1;
+  /** The leap and style the airborne half has to keep playing out - captured at release, since the shot is already over by then. */
+  private shotAirLeap: ShotLeap = SHOT_LEAPS.jumper;
+  private shotAirStyle: ShotStyle = 'jumper';
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
   /** Small accent light that tracks the controlled player - keeps them reading as the visual focal point (spec section 19/53). */
@@ -256,6 +260,8 @@ export class Game {
       // same clock to updateShotAir is what makes takeoff, release and
       // landing one arc instead of two animations stitched together.
       this.shotAirElapsed = this.playerController.shooting.chargeSeconds;
+      this.shotAirLeap = SHOT_LEAPS[this.lastSeenShotResult.style];
+      this.shotAirStyle = this.lastSeenShotResult.style;
     }
     this.rules.update(
       dt,
@@ -370,7 +376,7 @@ export class Game {
         // Sink into the loaded stance as the shot winds up, and bring
         // BOTH hands to the ball - a real gather is two-handed, where
         // this previously left the off hand swinging at the hip.
-        this.player.loadShot(this.playerController.shooting.chargeSeconds);
+        this.player.loadShot(this.playerController.shooting.chargeSeconds, this.playerController.shooting.leap);
         this.player.pointArmAtBall(1, this.ball.position);
         this.player.pointArmAtBall(-1, this.ball.position);
       } else {
@@ -383,8 +389,8 @@ export class Game {
       }
     } else if (this.shotAirElapsed >= 0) {
       this.shotAirElapsed += dt;
-      this.player.updateShotAir(this.shotAirHand, this.shotAirElapsed);
-      if (this.shotAirElapsed >= SHOT_LANDING_SECONDS) this.shotAirElapsed = -1;
+      this.player.updateShotAir(this.shotAirHand, this.shotAirElapsed, this.shotAirLeap, this.shotAirStyle);
+      if (this.shotAirElapsed >= shotLandingSeconds(this.shotAirLeap)) this.shotAirElapsed = -1;
     }
     this.cameraController.update(this.player.position, this.ball.position, dt, {
       speed: this.playerController.movement.speed,
@@ -433,7 +439,8 @@ export class Game {
         `shotState: ${this.playerController.shooting.state}`,
         `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
         `shotAir: ${this.shotAirElapsed.toFixed(3)}s  chargeS: ${this.playerController.shooting.chargeSeconds.toFixed(3)}  visualY: ${this.player.visualRoot.position.y.toFixed(3)}`,
-        `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
+        `shotStyle: ${this.playerController.shooting.style}`,
+        `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  style: ${this.playerController.lastShotResult?.style ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,
         `lastRuleEvent: ${this.rules.lastEvent?.detail ?? '-'}`,

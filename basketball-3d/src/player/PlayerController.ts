@@ -7,6 +7,7 @@ import { PlayerMovement, dampAngle } from './PlayerMovement';
 import { DribbleSystem, DRIBBLE_HEIGHT_HIGH, DRIBBLE_HEIGHT_LOW, DRIBBLE_HEIGHT_NORMAL } from './DribbleSystem';
 import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, nearestHoop, type ShotResult } from './ShootingSystem';
+import { isFinish } from './ShotStyles';
 import { PassingSystem } from './PassingSystem';
 import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
 import { BallOwnershipTracker } from '@/basketball/BallOwnership';
@@ -73,7 +74,16 @@ export class PlayerController {
     // the whole hold, which read as a canned "gather" that never actually
     // stopped moving - as if the two systems were fighting each other.
     const charging = this.shooting.state === 'charging';
-    const moveAxis = charging ? { x: 0, y: 0 } : this.input.moveAxis;
+    // A gather kills the stick, and so does leaving the floor: you do
+    // not get to keep accelerating in mid-air. A finish is the one case
+    // that keeps the stick briefly - through the dip, so the drive
+    // carries into the gather rather than stopping dead a stride short
+    // of the basket - and gives it up the moment the legs fire. Without
+    // that cutoff a sprinting dunker kept driving for the whole hang
+    // time and sailed several metres past the rim.
+    const airborne = this.shooting.chargeSeconds >= this.shooting.leap.dipSeconds;
+    const steerable = charging && this.shooting.style !== 'jumper' && !airborne;
+    const moveAxis = charging && !steerable ? { x: 0, y: 0 } : this.input.moveAxis;
     const displacement = this.movement.step(moveAxis, sprint, dt);
     this.player.applyMovement(displacement, dt);
 
@@ -118,13 +128,22 @@ export class PlayerController {
 
   private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean, defenderPosition?: THREE.Vector3): void {
     if (this.hasBall && this.shooting.state === 'idle' && this.input.wasPressedThisFrame('shoot')) {
-      this.shooting.startCharge();
+      this.shooting.startCharge(hoops, this.movement.velocity);
     }
 
     if (this.shooting.state === 'charging') {
       this.dribbleSprintActive = false;
-      this.shooting.fixedUpdate(dt, this.hand);
-      if (this.input.wasReleasedThisFrame('shoot')) {
+      this.shooting.fixedUpdate(dt, this.hand, hoops);
+      // A finish releases at the top of its own jump and ONLY there: it
+      // is committed the moment it starts, so letting go of the button
+      // early must not fire it. It used to, which meant a quick tap on a
+      // drive threw the ball at the rim from below it, before the arm had
+      // even finished reaching. A jump shot is the opposite - the button
+      // release IS the shot.
+      const releaseNow = isFinish(this.shooting.style)
+        ? this.shooting.autoReleaseDue
+        : this.input.wasReleasedThisFrame('shoot');
+      if (releaseNow) {
         const result = this.shooting.release(hoops, defenderPosition);
         if (result) {
           this.lastShotResult = result;

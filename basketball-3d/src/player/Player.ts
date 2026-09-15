@@ -5,6 +5,7 @@ import { PhysicsMaterials } from '@/physics/MaterialProperties';
 import { CollisionGroup, interactionGroups } from '@/physics/CollisionLayers';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { clamp } from '@/utils/MathUtils';
+import { shotLift, shotLandingSeconds, type ShotLeap, type ShotStyle } from './ShotStyles';
 
 const GRAVITY = -9.81;
 const GROUNDED_STICK_VELOCITY = -0.6;
@@ -203,39 +204,15 @@ function legStanceDrop(hip: number, knee: number): number {
 }
 
 /**
- * The shooter's height off the floor at `elapsed` seconds into the shot
- * motion. This is a REAL ballistic arc - one takeoff speed and actual
- * gravity - not a curve fitted to charge progress.
- *
- * That distinction is the whole fix for the shot reading as levitation.
- * The previous version keyed the rise to how far along the meter was, so
- * the body took ~0.40s to climb and ~0.46s to come back down. A 13cm hop
- * under real gravity is a 0.33s round trip, so the shooter was moving
- * vertically at well under half the speed gravity would carry them - and
- * the eye reads that as floating no matter how small the hop is. The
- * height was never the problem; the timing was.
- *
- * Being a function of seconds rather than of progress also means the
- * airborne phase after release just keeps advancing the same clock (see
- * Game.ts's shotAirElapsed), so takeoff, release and landing are one
- * continuous arc with no seam where the ball leaves.
- */
-export function shotChargeLift(elapsedSeconds: number): number {
-  const t = elapsedSeconds - SHOT_DIP_SECONDS;
-  if (t <= 0) return 0;
-  return Math.max(0, SHOT_TAKEOFF_SPEED * t - 0.5 * SHOT_JUMP_GRAVITY * t * t);
-}
-
-/**
  * How deep into the loaded stance the shooter is at `elapsed` seconds:
  * sinking through the dip, then extending explosively as the legs drive
  * the body off the floor. Hitting 0 exactly as the jump starts is what
  * makes the dip and the takeoff read as one push rather than a squat the
  * body then floats up out of.
  */
-function shotDipAmount(elapsedSeconds: number): number {
-  if (elapsedSeconds <= SHOT_DIP_SECONDS) return elapsedSeconds / SHOT_DIP_SECONDS;
-  const extendT = (elapsedSeconds - SHOT_DIP_SECONDS) / SHOT_EXTEND_SECONDS;
+function shotDipAmount(elapsedSeconds: number, leap: ShotLeap): number {
+  if (elapsedSeconds <= leap.dipSeconds) return elapsedSeconds / leap.dipSeconds;
+  const extendT = (elapsedSeconds - leap.dipSeconds) / SHOT_EXTEND_SECONDS;
   return Math.max(0, 1 - extendT);
 }
 
@@ -335,20 +312,8 @@ const ELBOW_BENT = 2.0;
  */
 const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at the bottom of the dip
 const SHOT_LOAD_HIP = 0.68; // radians the thigh pitches forward through the load (applied negative)
-/** Seconds spent sinking into the load before the legs fire. */
-const SHOT_DIP_SECONDS = 0.15;
 /** Seconds the legs take to snap from fully loaded to fully extended - this IS the takeoff. */
 const SHOT_EXTEND_SECONDS = 0.12;
-/**
- * Takeoff speed, m/s. Everything about the jump follows from this and
- * gravity: apex = v^2/2g = 0.247m, reached 0.224s after takeoff, back on
- * the floor 0.449s after takeoff. Deliberately a jump shot's hop, not a
- * max-effort vertical.
- */
-const SHOT_TAKEOFF_SPEED = 2.2;
-const SHOT_JUMP_GRAVITY = 9.81;
-/** Seconds from the button going down to the shooter's feet being back on the floor. */
-export const SHOT_LANDING_SECONDS = SHOT_DIP_SECONDS + (2 * SHOT_TAKEOFF_SPEED) / SHOT_JUMP_GRAVITY;
 const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
 const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
 const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
@@ -630,9 +595,9 @@ export class Player {
    * whatever stance that produced) and before/alongside pointArmAtBall,
    * which handles the ball-side arm.
    */
-  loadShot(elapsedSeconds: number): void {
+  loadShot(elapsedSeconds: number, leap: ShotLeap): void {
     const elapsed = Math.max(0, elapsedSeconds);
-    const dip = shotDipAmount(elapsed);
+    const dip = shotDipAmount(elapsed, leap);
 
     const priorKnee = this.rig.legs.left.lower.rotation.x;
     const hip = Math.max(CROUCH_HIP_BEND * this.currentCrouch, SHOT_LOAD_HIP * dip);
@@ -648,7 +613,7 @@ export class Player {
     this.visualRoot.position.y +=
       legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) -
       legStanceDrop(hip, knee) +
-      shotChargeLift(elapsed);
+      shotLift(elapsed, leap);
   }
 
   /**
@@ -668,25 +633,28 @@ export class Player {
    * way updateWalkCycle's bob/crouch offsets are, so the physics capsule,
    * ball flight and character controller are all untouched.
    */
-  updateShotAir(hand: 1 | -1, elapsedSeconds: number): void {
-    const height = shotChargeLift(elapsedSeconds);
+  updateShotAir(hand: 1 | -1, elapsedSeconds: number, leap: ShotLeap, style: ShotStyle): void {
+    const height = shotLift(elapsedSeconds, leap);
+    const landing = shotLandingSeconds(leap);
     // 1 at takeoff, 0 at touchdown - drives the leg tuck and the guide
     // hand relaxing out of the follow-through on the way down.
-    const air = clamp(
-      (SHOT_LANDING_SECONDS - elapsedSeconds) / (SHOT_LANDING_SECONDS - SHOT_DIP_SECONDS),
-      0,
-      1,
-    );
+    const air = clamp((landing - elapsedSeconds) / (landing - leap.dipSeconds), 0, 1);
 
     for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
       leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * air);
       leg.upper.rotation.x = -SHOT_AIR_HIP * air;
     }
 
-    // Both arms finish overhead - the guide hand comes up with the
-    // shooting hand on a real jump shot, it doesn't stay at the hip.
+    // Both arms finish overhead on a jump shot - the guide hand comes up
+    // with the shooting hand, it doesn't stay at the hip. A layup or a
+    // dunk is the opposite: one hand takes the ball to the rim and the
+    // off arm stays out for balance and to fend off the defender, so it
+    // is swung wide rather than raised.
     const shootDir = new THREE.Vector3(0, 1, SHOT_ARM_FORWARD).normalize();
-    const guideDir = new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize();
+    const guideDir =
+      style === 'jumper'
+        ? new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize()
+        : new THREE.Vector3(-hand * 1.1, -0.35, 0.2).normalize();
     const shootArm = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
     const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
     shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
