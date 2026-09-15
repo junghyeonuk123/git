@@ -28,8 +28,14 @@ const SHOT_JUMP_GRAVITY = 9.81;
  * Apex heights fall out as v^2/2g:
  *
  *   jumper  0.25m, at 0.37s, feet down at 0.60s
- *   layup   0.90m, at 0.53s, feet down at 0.96s
+ *   layup   1.03m, at 0.56s, feet down at 1.02s
  *   dunk    1.22m, at 0.60s, feet down at 1.10s
+ *
+ * The layup's 1.03m is what it takes to get the ball ABOVE a 3.05m rim
+ * at full extension (2.05 + 1.03 = 3.08m). That matters for the finish
+ * taken from under the basket: below rim height the only shot available
+ * is one that climbs past the ring, and it clips the underside of it on
+ * the way up. Above it, the ball is simply laid over and dropped in.
  *
  * The dunk's 1.22m is high for a vertical leap, and it is set by the rig
  * rather than by taste: this character's shoulder is at 1.55m with a
@@ -39,7 +45,7 @@ const SHOT_JUMP_GRAVITY = 9.81;
  */
 export const SHOT_LEAPS: Record<ShotStyle, ShotLeap> = {
   jumper: { dipSeconds: 0.15, takeoffSpeed: 2.2 },
-  layup: { dipSeconds: 0.1, takeoffSpeed: 4.2 },
+  layup: { dipSeconds: 0.1, takeoffSpeed: 4.5 },
   dunk: { dipSeconds: 0.1, takeoffSpeed: 4.9 },
 };
 

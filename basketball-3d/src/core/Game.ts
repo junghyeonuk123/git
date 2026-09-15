@@ -373,12 +373,20 @@ export class Game {
     const charging = this.playerController.shooting.state === 'charging';
     if (this.playerController.hasBall) {
       if (charging) {
-        // Sink into the loaded stance as the shot winds up, and bring
-        // BOTH hands to the ball - a real gather is two-handed, where
-        // this previously left the off hand swinging at the hip.
-        this.player.loadShot(this.playerController.shooting.chargeSeconds, this.playerController.shooting.leap);
-        this.player.pointArmAtBall(1, this.ball.position);
-        this.player.pointArmAtBall(-1, this.ball.position);
+        // Sink into the loaded stance as the shot winds up. A jump shot
+        // then brings BOTH hands to the ball, because a real gather is
+        // two-handed. A layup or a dunk is one-handed the whole way up
+        // and drives a knee rather than tucking both legs, so it gets
+        // its own rise pose - without it the finish read as a stiff
+        // two-armed reach with the legs left straight.
+        const shooting = this.playerController.shooting;
+        this.player.loadShot(shooting.chargeSeconds, shooting.leap);
+        if (shooting.style === 'jumper') {
+          this.player.pointArmAtBall(1, this.ball.position);
+          this.player.pointArmAtBall(-1, this.ball.position);
+        } else {
+          this.player.updateFinishRise(this.playerController.hand, shooting.chargeSeconds, shooting.leap, this.ball.position);
+        }
       } else {
         // visually plants the dribbling hand on the ball instead of letting
         // it read as a separate object bouncing near the player (spec
@@ -440,6 +448,7 @@ export class Game {
         `shotMeter: ${this.playerController.shooting.meter.toFixed(3)}`,
         `shotAir: ${this.shotAirElapsed.toFixed(3)}s  chargeS: ${this.playerController.shooting.chargeSeconds.toFixed(3)}  visualY: ${this.player.visualRoot.position.y.toFixed(3)}`,
         `shotStyle: ${this.playerController.shooting.style}`,
+        `lastShotVel: ${this.playerController.lastShotResult ? `${this.playerController.lastShotResult.velocity.x.toFixed(2)}, ${this.playerController.lastShotResult.velocity.y.toFixed(2)}, ${this.playerController.lastShotResult.velocity.z.toFixed(2)}` : '-'}`,
         `lastShotZone: ${this.playerController.lastShotResult?.zone ?? '-'}  style: ${this.playerController.lastShotResult?.style ?? '-'}  contest: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestLevel.toFixed(2) : '-'}  contestDist: ${this.playerController.lastShotResult ? this.playerController.lastShotResult.contestDistance.toFixed(2) : '-'}`,
         `score: ${this.rules.score}  quarter: ${this.rules.quarter}  quarterClock: ${this.rules.quarterClock.toFixed(1)}`,
         `shotClock: ${this.rules.shotClock.toFixed(1)}`,

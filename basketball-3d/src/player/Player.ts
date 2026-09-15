@@ -12,6 +12,8 @@ const GROUNDED_STICK_VELOCITY = -0.6;
 const UP = new THREE.Vector3(0, 1, 0);
 /** Scratch target for updateDribbleArm - avoids allocating a Vector3 every frame. */
 const HAND_TARGET = new THREE.Vector3();
+/** Scratch direction for the finishing off arm. */
+const OFF_ARM_DIR = new THREE.Vector3();
 /** Scratch + geometry for the hand anchor: out to the side of the hip, and a little in front of it. */
 const HAND_OFFSET = new THREE.Vector3();
 /**
@@ -314,6 +316,24 @@ const SHOT_LOAD_KNEE = 1.45; // radians of knee bend at the bottom of the dip
 const SHOT_LOAD_HIP = 0.68; // radians the thigh pitches forward through the load (applied negative)
 /** Seconds the legs take to snap from fully loaded to fully extended - this IS the takeoff. */
 const SHOT_EXTEND_SECONDS = 0.12;
+/**
+ * A layup and a dunk leave the floor off one foot, so the legs do not
+ * tuck symmetrically the way a jump shot's do - the knee on the
+ * finishing side drives up and the other trails behind. That split is
+ * most of what makes the motion read as attacking the rim rather than
+ * hopping at it, and it was missing entirely: through the whole rise the
+ * legs were simply straight, because loadShot unwinds the dip and
+ * nothing replaced it until after the ball was gone.
+ */
+const FINISH_TUCK_SECONDS = 0.18; // how quickly the legs gather after takeoff
+const FINISH_LEAD_HIP = 1.15; // radians the driving thigh comes up (applied negative = forward)
+const FINISH_LEAD_KNEE = 1.35;
+const FINISH_TRAIL_HIP = 0.45; // radians the trailing thigh swings back
+const FINISH_TRAIL_KNEE = 1.0;
+/** The off arm swings wide for balance instead of coming up with the ball - a finish is one-handed. */
+const FINISH_OFF_ARM_SPREAD = 1.0;
+const FINISH_OFF_ARM_ELBOW = 0.7;
+
 const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
 const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
 const SHOT_ARM_FORWARD = 0.3; // how far forward "straight up" leans for the release/follow-through
@@ -617,6 +637,38 @@ export class Player {
   }
 
   /**
+   * The airborne limbs of a layup or a dunk - one knee driven up, the
+   * other trailing, off arm wide for balance. `amount` blends the pose
+   * in from nothing so the gather flows into it rather than snapping.
+   */
+  private poseFinishLimbs(hand: 1 | -1, amount: number): void {
+    const lead = hand === 1 ? this.rig.legs.right : this.rig.legs.left;
+    const trail = hand === 1 ? this.rig.legs.left : this.rig.legs.right;
+    lead.upper.rotation.x = -FINISH_LEAD_HIP * amount;
+    lead.lower.rotation.x = FINISH_LEAD_KNEE * amount;
+    trail.upper.rotation.x = FINISH_TRAIL_HIP * amount;
+    trail.lower.rotation.x = FINISH_TRAIL_KNEE * amount;
+
+    const off = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
+    OFF_ARM_DIR.set(-hand * FINISH_OFF_ARM_SPREAD, -0.45, -0.3).normalize();
+    off.upper.quaternion.setFromUnitVectors(DOWN, OFF_ARM_DIR);
+    setElbow(off, FINISH_OFF_ARM_ELBOW * amount);
+  }
+
+  /**
+   * The rise of a layup or a dunk, while the ball is still in the hand.
+   *
+   * A jump shot's gather is two-handed and both arms track the ball, but
+   * a finish is one-handed the whole way - the off arm swings out rather
+   * than coming up with it. Call after loadShot, in place of the two
+   * pointArmAtBall calls a jump shot gets.
+   */
+  updateFinishRise(hand: 1 | -1, elapsedSeconds: number, leap: ShotLeap, ballWorldPos: THREE.Vector3): void {
+    this.poseFinishLimbs(hand, clamp((elapsedSeconds - leap.dipSeconds) / FINISH_TUCK_SECONDS, 0, 1));
+    this.pointArmAtBall(hand, ballWorldPos);
+  }
+
+  /**
    * The airborne half: an actual jump off the floor with the legs tucked
    * and both arms held extended overhead through the release and
    * follow-through, landing at the end of the window. Real broadcast
@@ -640,9 +692,15 @@ export class Player {
     // hand relaxing out of the follow-through on the way down.
     const air = clamp((landing - elapsedSeconds) / (landing - leap.dipSeconds), 0, 1);
 
-    for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
-      leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * air);
-      leg.upper.rotation.x = -SHOT_AIR_HIP * air;
+    if (style === 'jumper') {
+      for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
+        leg.lower.rotation.x = Math.max(leg.lower.rotation.x, SHOT_AIR_TUCK * air);
+        leg.upper.rotation.x = -SHOT_AIR_HIP * air;
+      }
+    } else {
+      // Carry the rise's pose straight through the release, so the body
+      // does not visibly change shape the instant the ball leaves.
+      this.poseFinishLimbs(hand, air);
     }
 
     // Both arms finish overhead on a jump shot - the guide hand comes up
@@ -651,16 +709,15 @@ export class Player {
     // off arm stays out for balance and to fend off the defender, so it
     // is swung wide rather than raised.
     const shootDir = new THREE.Vector3(0, 1, SHOT_ARM_FORWARD).normalize();
-    const guideDir =
-      style === 'jumper'
-        ? new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize()
-        : new THREE.Vector3(-hand * 1.1, -0.35, 0.2).normalize();
     const shootArm = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
-    const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
     shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
     setElbow(shootArm, ELBOW_STRAIGHT);
-    guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);
-    setElbow(guideArm, THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - air));
+    if (style === 'jumper') {
+      const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
+      const guideDir = new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize();
+      guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);
+      setElbow(guideArm, THREE.MathUtils.lerp(ELBOW_STRAIGHT, 0.6, 1 - air));
+    }
 
     this.visualRoot.position.y += height;
   }

@@ -48,7 +48,7 @@ const GATHER_HEIGHT_LOW = 1.0; // catch pocket, roughly hip/chest height
  */
 const GATHER_HEIGHT_HIGH: Record<ShotStyle, number> = {
   jumper: 1.5,
-  layup: 2.0,
+  layup: 2.05,
   dunk: 2.05,
 };
 
@@ -88,6 +88,21 @@ const LAYUP_ANGLE_DEG = 64;
  * whole point of an arc.
  */
 const LAYUP_RELEASE_DISTANCE = 1.9;
+/**
+ * Inside this, a layup stops being an arc at all and is laid over the
+ * rim instead - it goes all the way to the top of the jump and drops the
+ * ball in, the same shape as a dunk but soft.
+ *
+ * Measured, this is why the under-the-basket finish missed: released
+ * 0.33m from the rim and 0.23m BELOW it, the only arc that reaches the
+ * hoop has to climb past the ring, and the ball's edge fouls the
+ * underside of the iron on the way up - 0.127m between centres against
+ * 0.141m of combined radius. There is no launch angle that avoids it.
+ * From above the rim the problem does not exist.
+ */
+const LAYUP_DROP_DISTANCE = 1.1;
+/** Horizontal speed a laid-over layup is dropped with - gentler than a dunk's stuff. */
+const LAYUP_DROP_SPEED = 2.2;
 /**
  * ...but never before the ball has been carried up, however close the
  * drive started. This matters most for the case it looks least relevant
@@ -377,7 +392,14 @@ export class ShootingSystem {
     this.player.getHandPosition(gatherPos, hand * (1 - centering * windupT), gatherHeight);
     if (isFinish(this.currentStyle)) {
       const hoop = nearestHoop(hoops, gatherPos);
-      if (this.currentStyle === 'dunk') reachTowardRim(gatherPos, hoop, windupT);
+      // A dunk always reaches the ball over the hoop. A layup does too,
+      // but only when it is close enough to be laying the ball over
+      // rather than arcing it in - reaching on an arc layup would eat
+      // the horizontal distance that shot is deliberately keeping.
+      // Without it the lay-over threw the ball sideways across the rim
+      // at 2 m/s, which is the same way the dunk used to miss.
+      const laying = this.currentStyle === 'layup' && rimDistance(gatherPos, hoop) <= LAYUP_DROP_DISTANCE;
+      if (this.currentStyle === 'dunk' || laying) reachTowardRim(gatherPos, hoop, windupT);
       clampClearOfBoard(gatherPos, hoop);
       this.releaseDue = this.finishReleaseDue(gatherPos, hoop);
     }
@@ -393,8 +415,12 @@ export class ShootingSystem {
     const apex = shotApexSeconds(this.leap);
     if (this.chargeSeconds >= apex) return true;
     if (this.currentStyle !== 'layup') return false;
+    // Close in, the shot is a lay-over rather than an arc, and it needs
+    // every centimetre of the jump to clear the rim - so it waits for
+    // the top even though the distance condition is long since met.
+    if (rimDistance(ballPos, hoop) <= LAYUP_DROP_DISTANCE) return false;
     if (this.chargeSeconds < apex * LAYUP_MIN_RELEASE_FRACTION) return false;
-    return Math.hypot(hoop.rimCenter.x - ballPos.x, hoop.rimCenter.z - ballPos.z) <= LAYUP_RELEASE_DISTANCE;
+    return rimDistance(ballPos, hoop) <= LAYUP_RELEASE_DISTANCE;
   }
 
   /** Releases the shot at the nearest hoop. Returns null if not currently charging. */
@@ -416,7 +442,9 @@ export class ShootingSystem {
 
     let velocity: THREE.Vector3;
     if (style === 'dunk') {
-      velocity = this.solveDunk(releasePos, targetHoop);
+      velocity = this.solveDrop(releasePos, targetHoop, DUNK_THROW_SPEED);
+    } else if (style === 'layup' && rimDistance(releasePos, targetHoop) <= LAYUP_DROP_DISTANCE) {
+      velocity = this.solveDrop(releasePos, targetHoop, LAYUP_DROP_SPEED);
     } else {
       const isLayup = style === 'layup';
       const target = isLayup ? targetHoop.rimCenter : zone === 'bank' ? targetHoop.bankSpot : targetHoop.rimCenter;
@@ -460,9 +488,9 @@ export class ShootingSystem {
   }
 
   /**
-   * A dunk is not a shot at the rim, it is the ball being carried above
-   * the rim and put down through it, so it does not go through
-   * solveLaunch at all - there is no arc to solve. The hand is already
+   * Putting the ball down from above the rim rather than shooting at it -
+   * a dunk, or a layup laid over the rim from underneath. Neither goes
+   * through solveLaunch, because there is no arc to solve. The hand is already
    * higher than the target, which is exactly the case a launch-angle
    * solver cannot express.
    *
@@ -473,11 +501,11 @@ export class ShootingSystem {
    * shot in the game - a dunk taken from a bad angle can and does rattle
    * out.
    */
-  private solveDunk(releasePos: THREE.Vector3, hoop: Hoop): THREE.Vector3 {
+  private solveDrop(releasePos: THREE.Vector3, hoop: Hoop, throwSpeed: number): THREE.Vector3 {
     const dx = hoop.rimCenter.x - releasePos.x;
     const dz = hoop.rimCenter.z - releasePos.z;
     const flight = THREE.MathUtils.clamp(
-      Math.hypot(dx, dz) / DUNK_THROW_SPEED,
+      Math.hypot(dx, dz) / throwSpeed,
       DUNK_MIN_FLIGHT,
       DUNK_MAX_FLIGHT,
     );
@@ -529,6 +557,10 @@ function clampClearOfBoard(pos: THREE.Vector3, hoop: Hoop): void {
   const faceX = hoop.rimCenter.x + side * CD.hoop.rimDistanceFromBackboard;
   const limit = faceX - side * (CD.ball.radius + BOARD_CLEARANCE);
   pos.x = side > 0 ? Math.min(pos.x, limit) : Math.max(pos.x, limit);
+}
+
+function rimDistance(pos: THREE.Vector3, hoop: Hoop): number {
+  return Math.hypot(hoop.rimCenter.x - pos.x, hoop.rimCenter.z - pos.z);
 }
 
 function chooseStyle(from: THREE.Vector3, velocity: THREE.Vector2, hoops: readonly Hoop[]): ShotStyle {
