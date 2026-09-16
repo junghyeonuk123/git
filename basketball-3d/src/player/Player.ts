@@ -5,7 +5,7 @@ import { PhysicsMaterials } from '@/physics/MaterialProperties';
 import { CollisionGroup, interactionGroups } from '@/physics/CollisionLayers';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { clamp } from '@/utils/MathUtils';
-import { shotLift, shotLandingSeconds, type ShotLeap, type ShotStyle } from './ShotStyles';
+import { SHOT_STYLE_SPECS, shotLift, shotLandingSeconds, type ShotLeap, type ShotStyle } from './ShotStyles';
 
 const GRAVITY = -9.81;
 const GROUNDED_STICK_VELOCITY = -0.6;
@@ -333,6 +333,15 @@ const FINISH_TRAIL_KNEE = 1.0;
 /** The off arm swings wide for balance instead of coming up with the ball - a finish is one-handed. */
 const FINISH_OFF_ARM_SPREAD = 1.0;
 const FINISH_OFF_ARM_ELBOW = 0.7;
+/**
+ * A two-foot jump stop goes up square: both knees come up together and
+ * neither leg trails, which is the whole silhouette of a power finish
+ * and the thing that tells it apart from a one-foot drive at a glance.
+ * Shallower than the one-foot drive's lead knee because a jump stop
+ * gathers the legs under the body rather than driving one of them up.
+ */
+const FINISH_SQUARE_HIP = 0.7;
+const FINISH_SQUARE_KNEE = 1.05;
 
 const SHOT_AIR_TUCK = 0.7; // radians of knee tuck while airborne
 const SHOT_AIR_HIP = 0.14; // radians the thighs drift forward while airborne (applied negative)
@@ -637,11 +646,27 @@ export class Player {
   }
 
   /**
-   * The airborne limbs of a layup or a dunk - one knee driven up, the
-   * other trailing, off arm wide for balance. `amount` blends the pose
-   * in from nothing so the gather flows into it rather than snapping.
+   * The airborne limbs of a finish. `amount` blends the pose in from
+   * nothing so the gather flows into it rather than snapping.
+   *
+   * Two shapes, and which one it is comes straight out of the shot's
+   * own spec rather than being decided here: a one-foot drive finish
+   * splits the legs - the knee on the finishing side drives up and the
+   * other trails behind - where a two-foot jump stop rises square and
+   * symmetrical with both hands on the ball. From the broadcast camera
+   * that difference in the legs is most of what distinguishes a power
+   * finish from a layup, since fore/aft arm rotation barely reads at
+   * all from up there.
    */
-  private poseFinishLimbs(hand: 1 | -1, amount: number): void {
+  private poseFinishLimbs(hand: 1 | -1, amount: number, style: ShotStyle): void {
+    if (SHOT_STYLE_SPECS[style].twoFooted) {
+      for (const leg of [this.rig.legs.left, this.rig.legs.right]) {
+        leg.upper.rotation.x = -FINISH_SQUARE_HIP * amount;
+        leg.lower.rotation.x = FINISH_SQUARE_KNEE * amount;
+      }
+      return;
+    }
+
     const lead = hand === 1 ? this.rig.legs.right : this.rig.legs.left;
     const trail = hand === 1 ? this.rig.legs.left : this.rig.legs.right;
     lead.upper.rotation.x = -FINISH_LEAD_HIP * amount;
@@ -663,9 +688,18 @@ export class Player {
    * than coming up with it. Call after loadShot, in place of the two
    * pointArmAtBall calls a jump shot gets.
    */
-  updateFinishRise(hand: 1 | -1, elapsedSeconds: number, leap: ShotLeap, ballWorldPos: THREE.Vector3): void {
-    this.poseFinishLimbs(hand, clamp((elapsedSeconds - leap.dipSeconds) / FINISH_TUCK_SECONDS, 0, 1));
+  updateFinishRise(
+    hand: 1 | -1,
+    elapsedSeconds: number,
+    leap: ShotLeap,
+    style: ShotStyle,
+    ballWorldPos: THREE.Vector3,
+  ): void {
+    this.poseFinishLimbs(hand, clamp((elapsedSeconds - leap.dipSeconds) / FINISH_TUCK_SECONDS, 0, 1), style);
     this.pointArmAtBall(hand, ballWorldPos);
+    // A jump stop is gathered and finished with two hands, so the guide
+    // arm comes up with the ball instead of swinging out to fend off.
+    if (SHOT_STYLE_SPECS[style].twoFooted) this.pointArmAtBall(-hand as 1 | -1, ballWorldPos);
   }
 
   /**
@@ -700,7 +734,7 @@ export class Player {
     } else {
       // Carry the rise's pose straight through the release, so the body
       // does not visibly change shape the instant the ball leaves.
-      this.poseFinishLimbs(hand, air);
+      this.poseFinishLimbs(hand, air, style);
     }
 
     // Both arms finish overhead on a jump shot - the guide hand comes up
@@ -712,7 +746,7 @@ export class Player {
     const shootArm = hand === 1 ? this.rig.arms.right : this.rig.arms.left;
     shootArm.upper.quaternion.setFromUnitVectors(DOWN, shootDir);
     setElbow(shootArm, ELBOW_STRAIGHT);
-    if (style === 'jumper') {
+    if (style === 'jumper' || SHOT_STYLE_SPECS[style].twoFooted) {
       const guideArm = hand === 1 ? this.rig.arms.left : this.rig.arms.right;
       const guideDir = new THREE.Vector3(-hand * 0.22, 1, SHOT_ARM_FORWARD * 0.8).normalize();
       guideArm.upper.quaternion.setFromUnitVectors(DOWN, guideDir);

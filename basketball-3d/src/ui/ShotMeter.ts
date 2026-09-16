@@ -1,5 +1,6 @@
 import type { ShootingSystem } from '@/player/ShootingSystem';
 import { METER_CAP, classifyMeter } from '@/player/ShootingSystem';
+import { SHOT_STYLE_SPECS } from '@/player/ShotStyles';
 import { clamp } from '@/utils/MathUtils';
 
 const ZONE_LABELS: Record<string, string> = {
@@ -29,9 +30,11 @@ export class ShotMeter {
 
     const frac = clamp(shooting.meter / METER_CAP, 0, 1);
     this.pointer.style.bottom = `${frac * 100}%`;
-    // A layup or a dunk has no release window to aim for, so grading it
-    // against the zones would be meaningless - name the finish instead.
+    // A finish has no release window to aim for, so grading it against
+    // the zones would be meaningless - name the finish instead, using
+    // the same spec table the shot itself is built from so a new one can
+    // never show up on screen unlabelled.
     this.label.textContent =
-      shooting.style === 'jumper' ? (ZONE_LABELS[classifyMeter(shooting.meter)] ?? '') : shooting.style.toUpperCase();
+      SHOT_STYLE_SPECS[shooting.style].label || (ZONE_LABELS[classifyMeter(shooting.meter)] ?? '');
   }
 }

@@ -10,7 +10,7 @@ import { Ball } from '@/basketball/Ball';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { BasketballRules } from '@/basketball/BasketballRules';
 import { Player } from '@/player/Player';
-import { SHOT_LEAPS, shotLandingSeconds, type ShotLeap, type ShotStyle } from '@/player/ShotStyles';
+import { SHOT_STYLE_SPECS, shotLandingSeconds, type ShotLeap, type ShotStyle } from '@/player/ShotStyles';
 import { PlayerController } from '@/player/PlayerController';
 import { nearestHoop, type ShotResult } from '@/player/ShootingSystem';
 import { DefenderAI } from '@/ai/DefenderAI';
@@ -88,7 +88,7 @@ export class Game {
   private shotAirElapsed = -1;
   private shotAirHand: 1 | -1 = 1;
   /** The leap and style the airborne half has to keep playing out - captured at release, since the shot is already over by then. */
-  private shotAirLeap: ShotLeap = SHOT_LEAPS.jumper;
+  private shotAirLeap: ShotLeap = SHOT_STYLE_SPECS.jumper.leap;
   private shotAirStyle: ShotStyle = 'jumper';
 
   private readonly GRAVITY_MAGNITUDE = 9.81;
@@ -260,7 +260,7 @@ export class Game {
       // same clock to updateShotAir is what makes takeoff, release and
       // landing one arc instead of two animations stitched together.
       this.shotAirElapsed = this.playerController.shooting.chargeSeconds;
-      this.shotAirLeap = SHOT_LEAPS[this.lastSeenShotResult.style];
+      this.shotAirLeap = SHOT_STYLE_SPECS[this.lastSeenShotResult.style].leap;
       this.shotAirStyle = this.lastSeenShotResult.style;
     }
     this.rules.update(
@@ -385,7 +385,13 @@ export class Game {
           this.player.pointArmAtBall(1, this.ball.position);
           this.player.pointArmAtBall(-1, this.ball.position);
         } else {
-          this.player.updateFinishRise(this.playerController.hand, shooting.chargeSeconds, shooting.leap, this.ball.position);
+          this.player.updateFinishRise(
+            this.playerController.hand,
+            shooting.chargeSeconds,
+            shooting.leap,
+            shooting.style,
+            this.ball.position,
+          );
         }
       } else {
         // visually plants the dribbling hand on the ball instead of letting

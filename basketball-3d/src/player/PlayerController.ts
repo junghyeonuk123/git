@@ -128,7 +128,7 @@ export class PlayerController {
 
   private handlePossession(dt: number, hoops: readonly Hoop[], sprint: boolean, defenderPosition?: THREE.Vector3): void {
     if (this.hasBall && this.shooting.state === 'idle' && this.input.wasPressedThisFrame('shoot')) {
-      this.shooting.startCharge(hoops, this.movement.velocity);
+      this.shooting.startCharge(hoops, this.movement.velocity, defenderPosition);
     }
 
     if (this.shooting.state === 'charging') {

@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import type { Player } from './Player';
 import {
-  SHOT_LEAPS,
+  SHOT_STYLE_SPECS,
+  isDropFinish,
   isFinish,
   shotApexSeconds,
   shotLift,
   type ShotLeap,
   type ShotStyle,
+  type ShotStyleSpec,
 } from './ShotStyles';
 import type { Ball } from '@/basketball/Ball';
 import type { Hoop } from '@/basketball/Hoop';
@@ -39,18 +41,8 @@ export const ZONE_BANK_MAX = 0.8;
 // gather height over the charge gets a real winding-up arm motion for
 // free, with no separate shooting-pose animation system needed.
 const GATHER_HEIGHT_LOW = 1.0; // catch pocket, roughly hip/chest height
-/**
- * Set point measured from the FLOOR; the jump adds its own lift on top.
- * A jumper releases around 1.75m. A finish carries the ball as high as
- * the arm goes, because the hand has to get it to a 3.05m rim: the dunk
- * value is this rig's full overhead reach, and the dunk's 1.22m leap on
- * top of it puts the ball at 3.27m, clear of the rim.
- */
-const GATHER_HEIGHT_HIGH: Record<ShotStyle, number> = {
-  jumper: 1.5,
-  layup: 2.05,
-  dunk: 2.05,
-};
+// The set point each style winds up to lives in SHOT_STYLE_SPECS, next
+// to the leap that has to agree with it - see ShotStyles.ts.
 
 /** A finish is chosen by where the shooter is and how fast they are going at it, not by a button. */
 const DUNK_RANGE = 2.4; // meters from the rim
@@ -63,6 +55,91 @@ const DUNK_RANGE = 2.4; // meters from the rim
  */
 const DUNK_APPROACH_SPEED = 4;
 const LAYUP_RANGE = 4.2;
+
+/**
+ * THE FIVE FINISHES, AND WHAT PICKS EACH ONE
+ *
+ * Every one of these is a real shot with a real reason for existing, and
+ * the reason is always the same shape: from where you are, with the
+ * speed you have and the defender you have, it is the finish that gets
+ * the ball to the rim. So none of them has its own button - the
+ * situation picks, exactly the way it does on a court, and the player
+ * learns them by learning the situations (see chooseStyle).
+ *
+ *   reverse     you have gone under the basket, or you are crossing it
+ *               on the baseline: the rim is now between you and a normal
+ *               layup, so you carry the ball through and lay it in on
+ *               the FAR side, with the rim and your own body shielding
+ *               it from behind.
+ *   fingerRoll  you are underneath, with no runway to arc anything: you
+ *               reach up and roll it off the fingertips, over the front
+ *               of the ring and down, no glass.
+ *   power       you are close but you are not going anywhere - gathered
+ *               up, stopped, both feet down. You go straight up square
+ *               to the board and bank it in hard.
+ *   floater     you are in the in-between zone, too far to lay it in and
+ *               with a defender in the way. You go up off one foot early
+ *               and drop it over them before they can climb.
+ *   layup       the ordinary two-stride drive finish, laid up on the way
+ *               past the rim.
+ */
+
+/** Past the rim toward the baseline, or crossing it sideways - either way it is a reverse. */
+const REVERSE_RANGE = 1.8;
+/** Lateral (across-the-rim) speed that reads as a baseline drive rather than an attack at the front of the rim, m/s. */
+const REVERSE_LATERAL_SPEED = 1.6;
+/**
+ * How far past the rim's centre a reverse carries the ball before
+ * laying it back in, in meters. This IS the shot: the ball finishes on
+ * the opposite side from where the drive came, which is what puts the
+ * ring between it and everyone trailing the play.
+ */
+const REVERSE_CARRY = 0.28;
+const REVERSE_DROP_SPEED = 2.0;
+
+/** Reaching up from directly underneath - inside this there is no arc to be had at all. */
+const FINGER_ROLL_RANGE = 1.3;
+/** Softer than a laid-over layup and much softer than a dunk: the ball is rolled off the fingers, not thrown. */
+const FINGER_ROLL_SPEED = 1.7;
+
+/** A jump stop happens close in, and by definition it happens slowly. */
+const POWER_RANGE = 2.4;
+const POWER_CLOSING_SPEED = 1.3; // m/s - above this you are still driving, and a drive is a layup
+/** Flatter than a layup, because a power finish is driven into the glass rather than lofted over the ring. */
+const POWER_ANGLE_DEG = 58;
+/**
+ * How far above the rim a power finish hits the board, in meters -
+ * roughly the top of the painted square, which is what a player banking
+ * one in from underneath is actually aiming at.
+ *
+ * Higher than the jump shot's bank spot (rim + 0.18) on purpose. The
+ * ball has to come off the glass and still have room to fall the 0.38m
+ * back out to the ring; from rim + 0.18 the rebound was measured
+ * returning only about 0.05m horizontally before it was already level
+ * with the rim, so it dropped straight down the face of the board.
+ *
+ * Simulated against the real board restitution across the whole range
+ * this shot is taken from and every release height it is taken at, 0.35
+ * at 58 degrees puts the ball back through the ring every time, with
+ * the worst case still 0.03m inside the cylinder. Raising it further
+ * starts missing long from close in, and flattening the angle misses
+ * long everywhere.
+ */
+const POWER_BANK_RISE = 0.35;
+
+/** The in-between zone: too far to lay in, close enough that a jump shot is the wrong answer. */
+const FLOATER_MIN_RANGE = 2.4;
+/** A floater exists because someone is in the way - with nobody there, drive it. */
+const FLOATER_CONTEST_DISTANCE = 2.4;
+/** Far steeper than a jump shot, so it comes down almost vertically into the cylinder. */
+const FLOATER_ANGLE_DEG = 72;
+/**
+ * A floater is let go on the way UP, well before the top of the jump -
+ * that early release is the entire shot. Held to the apex it stops
+ * being a floater and becomes a short jumper the defender has had time
+ * to get a hand to.
+ */
+const FLOATER_RELEASE_FRACTION = 0.55;
 
 /**
  * Launch angle for a layup, degrees. Much steeper than the distance
@@ -122,11 +199,44 @@ const LAYUP_MIN_RELEASE_FRACTION = 0.8;
  * floater rather than a stuff.
  */
 const DUNK_THROW_SPEED = 3.2;
-const DUNK_MIN_FLIGHT = 0.09;
-const DUNK_MAX_FLIGHT = 0.3;
+const DROP_MIN_FLIGHT = 0.09;
+const DROP_MAX_FLIGHT = 0.3;
+/**
+ * Everything laid in softly gets a longer flight than a dunk, and it is
+ * what makes those shots work rather than a matter of taste. All of
+ * them finish from off to the side of the ring, so the ball has to pass
+ * OVER the iron on its way in - and a longer flight is a higher, more
+ * arced one. Capped at a dunk's 0.3, the finger roll was measured
+ * crossing the near edge of the ring 0.04m too low and clipping it.
+ */
+const SOFT_DROP_MAX_FLIGHT = 0.5;
 
-/** A dunk is barely alterable by a hand in your face; a layup very much is. */
-const DUNK_CONTEST_SCALE = 0.4;
+/**
+ * How much a hand in the face gets to alter each finish. A dunk is
+ * barely alterable; a power finish is meant to be taken through
+ * contact; a floater's whole purpose is to be released where the
+ * contest cannot reach it. An ordinary layup is very much alterable.
+ */
+const CONTEST_SCALE: Partial<Record<ShotStyle, number>> = {
+  dunk: 0.4,
+  power: 0.5,
+  floater: 0.6,
+};
+
+/**
+ * Backspin, as a fraction of a jump shot's. Anything put down from
+ * above the rim gets very little: a ball carrying a jump shot's
+ * backspin has about 3 m/s of surface speed, so any graze of the ring
+ * throws it clean out of the cylinder. A finger roll keeps a touch more
+ * than a dunk because that soft roll off the fingertips is the shot,
+ * and a power finish keeps all of it - backspin is what makes a hard
+ * bank stick to the glass instead of skidding off it.
+ */
+const SPIN_SCALE: Partial<Record<ShotStyle, number>> = {
+  dunk: 0.25,
+  fingerRoll: 0.35,
+  reverse: 0.5,
+};
 
 /** Clearance kept between the held ball and the face of the backboard - see clampClearOfBoard. */
 const BOARD_CLEARANCE = 0.06;
@@ -148,8 +258,6 @@ const BOARD_CLEARANCE = 0.06;
  */
 const DUNK_REACH = 0.55;
 
-/** A dunk is put down, not shot - it gets a fraction of a jump shot's backspin. */
-const DUNK_SPIN_SCALE = 0.25;
 // Windup finishes right around the swish window's release timing, not at
 // METER_CAP - holding past the sweet spot (bank/strong) keeps the ball
 // at full extension rather than continuing to rise indefinitely.
@@ -176,8 +284,20 @@ const SCOOP_METER = 0.17; // ~0.10s at FILL_RATE
  * real set point stays slightly to the shooting side.
  */
 const GATHER_CENTERING = 0.75;
-/** How far a layup draws the ball in toward the centreline - less than a two-handed set, more than a dunk. */
-const LAYUP_CENTERING = 0.55;
+/**
+ * How far each finish draws the ball in toward the centreline, where 0
+ * leaves it right out on the finishing hand and 1 is dead centre. A
+ * dunk and the two reaches stay out on the hand, because the hand is
+ * what carries the ball over the ring. A power finish is gathered in
+ * with two hands like a jump shot. A layup sits between the two.
+ */
+const CENTERING: Partial<Record<ShotStyle, number>> = {
+  dunk: 0,
+  fingerRoll: 0,
+  reverse: 0,
+  layup: 0.55,
+  floater: 0.5,
+};
 /**
  * Meter units per second. Raised from 1.0 so the swish window (meter
  * 0.62-0.70) is reached 0.36-0.41s after the button goes down, which is
@@ -294,14 +414,25 @@ export class ShootingSystem {
   private gatherFromY = GATHER_HEIGHT_LOW;
   private currentStyle: ShotStyle = 'jumper';
   private releaseDue = false;
+  /**
+   * Which way across the rim a reverse carries the ball, as the sign of
+   * world Z. Fixed when the motion starts, because it has to be: the
+   * player's lateral velocity is what chooses it, and that velocity is
+   * gone by the time the ball is being laid in on the far side.
+   */
+  private reverseSign: 1 | -1 = 1;
 
-  /** Jump shot, layup or dunk - decided when the motion starts and fixed for its duration. */
+  /** Which of the seven this is - decided when the motion starts and fixed for its duration. */
   get style(): ShotStyle {
     return this.currentStyle;
   }
 
+  get spec(): ShotStyleSpec {
+    return SHOT_STYLE_SPECS[this.currentStyle];
+  }
+
   get leap(): ShotLeap {
-    return SHOT_LEAPS[this.currentStyle];
+    return this.spec.leap;
   }
 
   /**
@@ -321,7 +452,12 @@ export class ShootingSystem {
   private get windupSeconds(): number {
     if (!isFinish(this.currentStyle)) return WINDUP_METER / FILL_RATE;
     const apex = shotApexSeconds(this.leap);
-    return this.currentStyle === 'layup' ? apex * LAYUP_MIN_RELEASE_FRACTION : apex;
+    // Two of them let go before the top of the jump, so they have to be
+    // fully extended earlier than the rest or the ball leaves the hand
+    // while the arm is still on its way up.
+    if (this.currentStyle === 'layup') return apex * LAYUP_MIN_RELEASE_FRACTION;
+    if (this.currentStyle === 'floater') return apex * FLOATER_RELEASE_FRACTION;
+    return apex;
   }
 
   /**
@@ -344,13 +480,16 @@ export class ShootingSystem {
   /**
    * @param hoops so the finish can be chosen from how close the rim is
    * @param velocity the shooter's world-space X/Z travel, for the closing speed a dunk needs
+   * @param defenderPosition so a floater can be chosen when there is actually somebody to shoot over
    */
-  startCharge(hoops: readonly Hoop[], velocity: THREE.Vector2): void {
+  startCharge(hoops: readonly Hoop[], velocity: THREE.Vector2, defenderPosition?: THREE.Vector3): void {
     if (this.state !== 'idle') return;
     this.state = 'charging';
     this.meter = 0;
     this.releaseDue = false;
-    this.currentStyle = chooseStyle(this.player.position, velocity, hoops);
+    const from = this.player.position;
+    this.currentStyle = chooseStyle(from, velocity, hoops, defenderPosition);
+    this.reverseSign = reverseCarrySign(from, velocity, nearestHoop(hoops, from));
     this.gatherFromY = THREE.MathUtils.clamp(
       this.ball.position.y - this.player.groundY,
       CD.ball.radius,
@@ -365,7 +504,7 @@ export class ShootingSystem {
 
     const windupT = Math.min(1, this.chargeSeconds / this.windupSeconds);
     const scoopT = Math.min(1, this.meter / SCOOP_METER);
-    const setHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, GATHER_HEIGHT_HIGH[this.currentStyle], windupT);
+    const setHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, this.spec.setHeight, windupT);
     // Scoop up out of the dribble first, then ride the windup.
     const pocketHeight = THREE.MathUtils.lerp(this.gatherFromY, setHeight, scoopT * scoopT * (3 - 2 * scoopT));
 
@@ -386,20 +525,26 @@ export class ShootingSystem {
     // extends, which is both what the shot looks like and what stops the
     // release sitting 0.44m off to one side - from there every layup was
     // thrown across the rim rather than at it.
-    const centering =
-      this.currentStyle === 'dunk' ? 0 : this.currentStyle === 'layup' ? LAYUP_CENTERING : GATHER_CENTERING;
+    const centering = CENTERING[this.currentStyle] ?? GATHER_CENTERING;
     const gatherPos = new THREE.Vector3();
     this.player.getHandPosition(gatherPos, hand * (1 - centering * windupT), gatherHeight);
     if (isFinish(this.currentStyle)) {
       const hoop = nearestHoop(hoops, gatherPos);
-      // A dunk always reaches the ball over the hoop. A layup does too,
-      // but only when it is close enough to be laying the ball over
-      // rather than arcing it in - reaching on an arc layup would eat
-      // the horizontal distance that shot is deliberately keeping.
-      // Without it the lay-over threw the ball sideways across the rim
-      // at 2 m/s, which is the same way the dunk used to miss.
+      // Anything put down from above the ring is reached there first
+      // rather than thrown at it - the hand anchor sits 0.44m out to the
+      // side of the body, and aiming from there sends the ball ACROSS
+      // the hoop instead of into it. A layup is reached the same way,
+      // but only once it is close enough to be laying the ball over
+      // rather than arcing it in: reaching on an arc layup would eat the
+      // horizontal distance that shot is deliberately keeping.
       const laying = this.currentStyle === 'layup' && rimDistance(gatherPos, hoop) <= LAYUP_DROP_DISTANCE;
-      if (this.currentStyle === 'dunk' || laying) reachTowardRim(gatherPos, hoop, windupT);
+      if (this.currentStyle === 'reverse') {
+        // A reverse reaches PAST the rim, not to it: the ball finishes
+        // on the far side and is laid back in from there.
+        reachTowardPoint(gatherPos, reverseAnchor(hoop, this.reverseSign), windupT);
+      } else if (isDropFinish(this.currentStyle) || laying) {
+        reachTowardPoint(gatherPos, hoop.rimCenter, windupT);
+      }
       clampClearOfBoard(gatherPos, hoop);
       this.releaseDue = this.finishReleaseDue(gatherPos, hoop);
     }
@@ -413,6 +558,8 @@ export class ShootingSystem {
    */
   private finishReleaseDue(ballPos: THREE.Vector3, hoop: Hoop): boolean {
     const apex = shotApexSeconds(this.leap);
+    // The one that deliberately goes early - see FLOATER_RELEASE_FRACTION.
+    if (this.currentStyle === 'floater') return this.chargeSeconds >= apex * FLOATER_RELEASE_FRACTION;
     if (this.chargeSeconds >= apex) return true;
     if (this.currentStyle !== 'layup') return false;
     // Close in, the shot is a lay-over rather than an arc, and it needs
@@ -441,14 +588,40 @@ export class ShootingSystem {
     const rimAngle = shotAngleForDistance(dxRim);
 
     let velocity: THREE.Vector3;
-    if (style === 'dunk') {
-      velocity = this.solveDrop(releasePos, targetHoop, DUNK_THROW_SPEED);
-    } else if (style === 'layup' && rimDistance(releasePos, targetHoop) <= LAYUP_DROP_DISTANCE) {
-      velocity = this.solveDrop(releasePos, targetHoop, LAYUP_DROP_SPEED);
+    if (isDropFinish(style) || (style === 'layup' && rimDistance(releasePos, targetHoop) <= LAYUP_DROP_DISTANCE)) {
+      // No arc to solve: the hand is already above the ring, so the ball
+      // is put down through it rather than shot at it. How hard it is
+      // put down is the whole difference between these - a dunk is
+      // stuffed, a reverse is flipped back across, a finger roll is
+      // barely thrown at all.
+      const throwSpeed =
+        style === 'dunk'
+          ? DUNK_THROW_SPEED
+          : style === 'fingerRoll'
+            ? FINGER_ROLL_SPEED
+            : style === 'reverse'
+              ? REVERSE_DROP_SPEED
+              : LAYUP_DROP_SPEED;
+      const maxFlight = style === 'dunk' ? DROP_MAX_FLIGHT : SOFT_DROP_MAX_FLIGHT;
+      velocity = this.solveDrop(releasePos, targetHoop, throwSpeed, maxFlight);
     } else {
-      const isLayup = style === 'layup';
-      const target = isLayup ? targetHoop.rimCenter : zone === 'bank' ? targetHoop.bankSpot : targetHoop.rimCenter;
-      const angle = isLayup ? THREE.MathUtils.degToRad(LAYUP_ANGLE_DEG) : rimAngle;
+      // A power finish is the only finish aimed at the glass rather than
+      // at the ring: squared up underneath, there is no room to loft
+      // anything over the front of the rim, so it goes off the square.
+      const target =
+        style === 'power'
+          ? powerBankSpot(targetHoop)
+          : style === 'jumper' && zone === 'bank'
+            ? targetHoop.bankSpot
+            : targetHoop.rimCenter;
+      const angle =
+        style === 'layup'
+          ? THREE.MathUtils.degToRad(LAYUP_ANGLE_DEG)
+          : style === 'floater'
+            ? THREE.MathUtils.degToRad(FLOATER_ANGLE_DEG)
+            : style === 'power'
+              ? THREE.MathUtils.degToRad(POWER_ANGLE_DEG)
+              : rimAngle;
       const solution = solveLaunch(releasePos, target, angle, this.physicsGravity, this.physicsDt) ?? {
         velocity: new THREE.Vector3(0, 6, 0),
         speed: 6,
@@ -465,13 +638,10 @@ export class ShootingSystem {
     }
 
     const contest = contestLevelFor(releasePos, defenderPosition);
-    velocity = applyContest(velocity, contest.level * (style === 'dunk' ? DUNK_CONTEST_SCALE : 1));
+    velocity = applyContest(velocity, contest.level * (CONTEST_SCALE[style] ?? 1));
 
     const horizAxis = new THREE.Vector3(-velocity.z, 0, velocity.x).normalize();
-    // A dunk barely spins: it is put down rather than shot, and a ball
-    // carrying a jump shot's backspin has 3 m/s of surface speed, so any
-    // graze of the rim throws it clean out of the cylinder.
-    const angularVelocity = horizAxis.multiplyScalar(style === 'dunk' ? BACKSPIN * DUNK_SPIN_SCALE : BACKSPIN);
+    const angularVelocity = horizAxis.multiplyScalar(BACKSPIN * (SPIN_SCALE[style] ?? 1));
 
     this.ball.release(velocity, angularVelocity);
     const points = pointsForRelease(releasePos, targetHoop);
@@ -501,13 +671,18 @@ export class ShootingSystem {
    * shot in the game - a dunk taken from a bad angle can and does rattle
    * out.
    */
-  private solveDrop(releasePos: THREE.Vector3, hoop: Hoop, throwSpeed: number): THREE.Vector3 {
+  private solveDrop(
+    releasePos: THREE.Vector3,
+    hoop: Hoop,
+    throwSpeed: number,
+    maxFlight: number = DROP_MAX_FLIGHT,
+  ): THREE.Vector3 {
     const dx = hoop.rimCenter.x - releasePos.x;
     const dz = hoop.rimCenter.z - releasePos.z;
     const flight = THREE.MathUtils.clamp(
       Math.hypot(dx, dz) / throwSpeed,
-      DUNK_MIN_FLIGHT,
-      DUNK_MAX_FLIGHT,
+      DROP_MIN_FLIGHT,
+      maxFlight,
     );
     const dy = hoop.rimCenter.y - releasePos.y;
     return new THREE.Vector3(
@@ -518,13 +693,6 @@ export class ShootingSystem {
   }
 }
 
-/**
- * Picks the finish from the situation rather than from a separate
- * button: close and moving hard at the rim is a dunk, close at any speed
- * is a layup, anything else is a jump shot. That is how it reads to a
- * player - you drive and it happens - and it means the shoot button
- * keeps doing one thing.
- */
 /**
  * Keeps the held ball on the court side of the backboard.
  *
@@ -538,13 +706,13 @@ export class ShootingSystem {
  * things.
  */
 /**
- * Stretches the held ball toward the point directly above the rim as the
- * dunk winds up, by at most DUNK_REACH - see that constant for why this
+ * Stretches the held ball horizontally toward `target` as the finish
+ * winds up, by at most DUNK_REACH - see that constant for why this
  * exists at all.
  */
-function reachTowardRim(pos: THREE.Vector3, hoop: Hoop, windupT: number): void {
-  const dx = hoop.rimCenter.x - pos.x;
-  const dz = hoop.rimCenter.z - pos.z;
+function reachTowardPoint(pos: THREE.Vector3, target: THREE.Vector3, windupT: number): void {
+  const dx = target.x - pos.x;
+  const dz = target.z - pos.z;
   const distance = Math.hypot(dx, dz);
   if (distance < 1e-4) return;
   const reach = Math.min(distance, DUNK_REACH * windupT);
@@ -563,17 +731,77 @@ function rimDistance(pos: THREE.Vector3, hoop: Hoop): number {
   return Math.hypot(hoop.rimCenter.x - pos.x, hoop.rimCenter.z - pos.z);
 }
 
-function chooseStyle(from: THREE.Vector3, velocity: THREE.Vector2, hoops: readonly Hoop[]): ShotStyle {
+/** The point on the far side of the ring a reverse carries the ball out to before laying it back in. */
+function reverseAnchor(hoop: Hoop, sign: 1 | -1): THREE.Vector3 {
+  return new THREE.Vector3(hoop.rimCenter.x, hoop.rimCenter.y, hoop.rimCenter.z + sign * REVERSE_CARRY);
+}
+
+/** Roughly the top of the painted square - what a power finish banks off. */
+function powerBankSpot(hoop: Hoop): THREE.Vector3 {
+  return new THREE.Vector3(hoop.bankSpot.x, hoop.rimCenter.y + POWER_BANK_RISE, hoop.bankSpot.z);
+}
+
+/**
+ * Which way across the rim a reverse finishes. Moving, it continues the
+ * way the drive was already going, which is what carries the ball
+ * through and out the other side. Standing under the basket there is no
+ * drive to continue, so it goes across to the side the player is not
+ * already on - either way the ring ends up between the ball and where
+ * the player came from, which is the point of the shot.
+ */
+function reverseCarrySign(from: THREE.Vector3, velocity: THREE.Vector2, hoop: Hoop): 1 | -1 {
+  if (Math.abs(velocity.y) > 0.8) return velocity.y >= 0 ? 1 : -1; // .y stores world Z
+  return from.z - hoop.rimCenter.z >= 0 ? -1 : 1;
+}
+
+/** True once the shooter is behind the ring, between it and the baseline - there is no shot from there but a reverse. */
+function isBehindRim(from: THREE.Vector3, rim: THREE.Vector3): boolean {
+  const side = Math.sign(rim.x) || 1;
+  return side * (from.x - rim.x) > 0;
+}
+
+/**
+ * Picks the finish from the situation rather than from a separate
+ * button. Order matters here and it is the order of how forced each
+ * choice is: behind the rim there is literally nothing else available,
+ * underneath it there is no runway to arc anything, and only once none
+ * of those apply does it come down to speed and to whether somebody is
+ * in the way.
+ */
+function chooseStyle(
+  from: THREE.Vector3,
+  velocity: THREE.Vector2,
+  hoops: readonly Hoop[],
+  defenderPosition?: THREE.Vector3,
+): ShotStyle {
   const rim = nearestHoop(hoops, from).rimCenter;
   const dx = rim.x - from.x;
   const dz = rim.z - from.z;
   const distance = Math.hypot(dx, dz);
   if (distance > LAYUP_RANGE) return 'jumper';
-  if (distance < 1e-3) return 'layup';
+  if (distance < 1e-3) return 'fingerRoll';
+
   // How fast the shooter is actually closing on the rim, not how fast
   // they happen to be moving - running past the basket is not a dunk.
   const closingSpeed = (velocity.x * dx + velocity.y * dz) / distance; // .y stores world Z
-  return distance <= DUNK_RANGE && closingSpeed >= DUNK_APPROACH_SPEED ? 'dunk' : 'layup';
+  // ...and the part of that travel going ACROSS the rim rather than at
+  // it, which is what a baseline drive looks like from here.
+  const lateralSpeed = Math.abs((velocity.x * dz - velocity.y * dx) / distance);
+
+  if (distance <= DUNK_RANGE && closingSpeed >= DUNK_APPROACH_SPEED) return 'dunk';
+  if (distance <= REVERSE_RANGE && (isBehindRim(from, rim) || lateralSpeed >= REVERSE_LATERAL_SPEED)) {
+    return 'reverse';
+  }
+  if (distance <= FINGER_ROLL_RANGE) return 'fingerRoll';
+  if (distance <= POWER_RANGE && closingSpeed < POWER_CLOSING_SPEED) return 'power';
+  if (
+    distance >= FLOATER_MIN_RANGE &&
+    defenderPosition !== undefined &&
+    from.distanceTo(defenderPosition) <= FLOATER_CONTEST_DISTANCE
+  ) {
+    return 'floater';
+  }
+  return 'layup';
 }
 
 export function nearestHoop(hoops: readonly Hoop[], from: THREE.Vector3): Hoop {
