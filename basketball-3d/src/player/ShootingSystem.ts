@@ -142,42 +142,51 @@ const FLOATER_ANGLE_DEG = 72;
 const FLOATER_RELEASE_FRACTION = 0.55;
 
 /**
- * Launch angle for a layup, degrees. Much steeper than the distance
- * heuristic a jump shot uses, which tops out at 50 and from a metre away
- * produces a flat line drive at the hoop: the ball arrives at the rim
- * moving nearly sideways, so the opening it has to fit through is at its
- * narrowest and it clangs. A layup is lofted precisely so it drops into
- * the cylinder rather than flying across it - that soft high touch is
- * the shot, not decoration.
+ * Launch angle for a layup, degrees, and it goes off the GLASS - at
+ * hoop.bankSpot, the same point on the square a jump shot banks off.
+ *
+ * That is what a layup is. Lofting one at the rim's centre instead,
+ * which is what this did at 64 degrees, is not a layup at all: it
+ * produces a high looping ball over the front of the ring, which is a
+ * floater, and it made the two shots indistinguishable. A layup is
+ * scooped UP into the square from close in and drops off the glass, and
+ * the angle is flat enough to read as a scoop rather than a loop.
+ *
+ * Simulated against the real board restitution from 0.9m to 2.3m out
+ * and across every release height the shot is taken at, 46 degrees into
+ * the existing bank spot goes in from all of them, with the worst case
+ * still 0.02m inside the cylinder, and clears the near edge of the ring
+ * on the way to the board by 0.04m at worst. Flatter than this and the
+ * ball rebounds off the glass too horizontally to fall back into the
+ * ring; steeper starts looking like the loop this replaced.
  */
-const LAYUP_ANGLE_DEG = 64;
+const LAYUP_ANGLE_DEG = 46;
 
 /**
  * A layup lets go when the ball gets this close to the rim, rather than
  * at a fixed point in the jump - or at the apex, whichever comes first.
  *
  * Distance is what the shot actually needs, and timing only approximates
- * it. Released from under the basket the arc has to climb almost
- * vertically past the ring, which means it crosses the rim's plane on
- * the way UP right beside the iron and clips it from underneath. Letting
- * go a stride out puts that upward crossing well clear in front, so the
- * only time the ball is near the ring is on the way down, which is the
- * whole point of an arc.
+ * it. Released from under the basket there is no angle into the glass at
+ * all, because the board is overhead rather than in front - so the shot
+ * has to let go while it still has some floor ahead of it. Close to the
+ * basket, which is where a layup is taken from, but not underneath it.
  */
-const LAYUP_RELEASE_DISTANCE = 1.9;
+const LAYUP_RELEASE_DISTANCE = 1.5;
 /**
  * Inside this, a layup stops being an arc at all and is laid over the
  * rim instead - it goes all the way to the top of the jump and drops the
  * ball in, the same shape as a dunk but soft.
  *
- * Measured, this is why the under-the-basket finish missed: released
- * 0.33m from the rim and 0.23m BELOW it, the only arc that reaches the
- * hoop has to climb past the ring, and the ball's edge fouls the
- * underside of the iron on the way up - 0.127m between centres against
- * 0.141m of combined radius. There is no launch angle that avoids it.
- * From above the rim the problem does not exist.
+ * From under the basket the backboard is overhead rather than in front,
+ * so there is no angle into it and nothing to bank off - and the only
+ * arc that reaches the ring from below has to climb past the iron and
+ * fouls it on the way up, 0.127m between centres against 0.141m of
+ * combined radius. Laying the ball over the rim from above is the shot
+ * a player actually takes from there, and it is the only one the
+ * geometry allows.
  */
-const LAYUP_DROP_DISTANCE = 1.1;
+const LAYUP_DROP_DISTANCE = 0.9;
 /** Horizontal speed a laid-over layup is dropped with - gentler than a dunk's stuff. */
 const LAYUP_DROP_SPEED = 2.2;
 /**
@@ -186,10 +195,13 @@ const LAYUP_DROP_SPEED = 2.2;
  * to: a player who presses from already under the basket has the
  * distance condition satisfied on the very first step, so a low value
  * here fires the shot at chest height from a metre out - the single
- * worst geometry available. Waiting until the ball is near full
- * extension is what gives that attempt a chance.
+ * worst geometry available.
+ *
+ * Well short of the top of the jump, though. A layup is scooped up and
+ * released ON THE RISE; holding it to the apex both looks wrong and
+ * carries the ball above the square it is meant to be laying it into.
  */
-const LAYUP_MIN_RELEASE_FRACTION = 0.8;
+const LAYUP_MIN_RELEASE_FRACTION = 0.6;
 
 /**
  * Horizontal speed the ball is thrown at on a dunk, and the bounds on
@@ -608,10 +620,15 @@ export class ShootingSystem {
       // A power finish is the only finish aimed at the glass rather than
       // at the ring: squared up underneath, there is no room to loft
       // anything over the front of the rim, so it goes off the square.
+      // A layup and a power finish are the two shots taken close enough
+      // to the basket to use the glass, and using it is what makes each
+      // look like itself. A power finish is squared up underneath and
+      // needs a higher point on the square than a layup scooping in off
+      // the drive.
       const target =
         style === 'power'
           ? powerBankSpot(targetHoop)
-          : style === 'jumper' && zone === 'bank'
+          : style === 'layup' || (style === 'jumper' && zone === 'bank')
             ? targetHoop.bankSpot
             : targetHoop.rimCenter;
       const angle =
