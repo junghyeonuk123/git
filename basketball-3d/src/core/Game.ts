@@ -380,7 +380,7 @@ export class Game {
         // its own rise pose - without it the finish read as a stiff
         // two-armed reach with the legs left straight.
         const shooting = this.playerController.shooting;
-        this.player.loadShot(shooting.chargeSeconds, shooting.leap);
+        this.player.loadShot(shooting.chargeSeconds, shooting.leap, this.playerController.hand);
         if (shooting.style === 'jumper') {
           this.player.pointArmAtBall(1, this.ball.position);
           this.player.pointArmAtBall(-1, this.ball.position);

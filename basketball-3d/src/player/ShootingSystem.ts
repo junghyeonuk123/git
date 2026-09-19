@@ -6,6 +6,8 @@ import {
   isFinish,
   shotApexSeconds,
   shotLift,
+  shotRiseSeconds,
+  SHOT_STEP_SECONDS,
   type ShotLeap,
   type ShotStyle,
   type ShotStyleSpec,
@@ -54,7 +56,26 @@ const DUNK_RANGE = 2.4; // meters from the rim
  * layups would essentially never happen.
  */
 const DUNK_APPROACH_SPEED = 4;
+/**
+ * A layup off a standstill or a jab step is taken from inside this. A
+ * real drive at the rim starts its gather further out than that - about
+ * where the free-throw line is - so a shooter who is genuinely closing
+ * on the basket gets to start one from LAYUP_DRIVE_RANGE instead. From
+ * a standstill out there it is a jump shot, which is what it would be.
+ */
 const LAYUP_RANGE = 4.2;
+const LAYUP_DRIVE_RANGE = 5.6;
+const LAYUP_DRIVE_SPEED = 2.0; // m/s of closing speed that counts as driving rather than standing
+
+/**
+ * Where the gather aims to put the ball when it lets go, in meters from
+ * the rim - the middle of the range the banked layup was solved over.
+ * The stride count is chosen to land on it (see strideSecondsFor), which
+ * is the whole reason the count is not fixed: two full strides from
+ * three metres out would carry the shooter clean under the basket
+ * before the ball ever left the hand.
+ */
+const LAYUP_RELEASE_TARGET = 1.4;
 
 /**
  * THE FIVE FINISHES, AND WHAT PICKS EACH ONE
@@ -127,8 +148,14 @@ const POWER_ANGLE_DEG = 58;
  */
 const POWER_BANK_RISE = 0.35;
 
-/** The in-between zone: too far to lay in, close enough that a jump shot is the wrong answer. */
+/**
+ * The in-between zone: too far to lay in, close enough that a jump shot
+ * is the wrong answer. It has a far edge as well as a near one - out
+ * past the ordinary layup range a drive still has the room to gather and
+ * lay the ball in, and a floater from out there is just a bad jump shot.
+ */
 const FLOATER_MIN_RANGE = 2.4;
+const FLOATER_MAX_RANGE = LAYUP_RANGE;
 /** A floater exists because someone is in the way - with nobody there, drive it. */
 const FLOATER_CONTEST_DISTANCE = 2.4;
 /** Far steeper than a jump shot, so it comes down almost vertically into the cylinder. */
@@ -422,9 +449,23 @@ export function classifyMeter(meter: number): ShotZone {
 export class ShootingSystem {
   state: 'idle' | 'charging' = 'idle';
   meter = 0;
+  /**
+   * Real seconds since the button went down, uncapped.
+   *
+   * This used to be derived from the meter, and that quietly made
+   * METER_CAP a ceiling on how long ANY shot motion could last: at
+   * FILL_RATE the meter tops out after 0.68s, so a shot that needs
+   * longer than that to reach its release - a layup with two gather
+   * strides in front of it needs 0.86s - simply never got there. The
+   * motion froze at full extension with the ball still in the hand, the
+   * meter pinned, and the shot never fired at all. The meter is the
+   * jump shot's timing gauge; it is not the clock.
+   */
+  private elapsed = 0;
   /** Ball height above the court the frame the gather started, so the scoop begins from where the ball really was. */
   private gatherFromY = GATHER_HEIGHT_LOW;
   private currentStyle: ShotStyle = 'jumper';
+  private currentLeap: ShotLeap = SHOT_STYLE_SPECS.jumper.leap;
   private releaseDue = false;
   /**
    * Which way across the rim a reverse carries the ball, as the sign of
@@ -443,8 +484,13 @@ export class ShootingSystem {
     return SHOT_STYLE_SPECS[this.currentStyle];
   }
 
+  /**
+   * The leap this particular attempt is running. Not just the style's,
+   * because a gather's stride count depends on how much floor there is
+   * left to cover - everything else about the jump is the style's.
+   */
   get leap(): ShotLeap {
-    return this.spec.leap;
+    return this.currentLeap;
   }
 
   /**
@@ -463,13 +509,12 @@ export class ShootingSystem {
   /** Seconds the ball takes to reach full extension - a finish is fully extended by the earliest moment it could release. */
   private get windupSeconds(): number {
     if (!isFinish(this.currentStyle)) return WINDUP_METER / FILL_RATE;
-    const apex = shotApexSeconds(this.leap);
     // Two of them let go before the top of the jump, so they have to be
     // fully extended earlier than the rest or the ball leaves the hand
     // while the arm is still on its way up.
-    if (this.currentStyle === 'layup') return apex * LAYUP_MIN_RELEASE_FRACTION;
-    if (this.currentStyle === 'floater') return apex * FLOATER_RELEASE_FRACTION;
-    return apex;
+    if (this.currentStyle === 'layup') return shotRiseSeconds(this.leap, LAYUP_MIN_RELEASE_FRACTION);
+    if (this.currentStyle === 'floater') return shotRiseSeconds(this.leap, FLOATER_RELEASE_FRACTION);
+    return shotApexSeconds(this.leap);
   }
 
   /**
@@ -479,7 +524,7 @@ export class ShootingSystem {
    * ShotStyles.shotLift) instead of on charge progress.
    */
   get chargeSeconds(): number {
-    return this.meter / FILL_RATE;
+    return this.elapsed;
   }
 
   constructor(
@@ -498,10 +543,13 @@ export class ShootingSystem {
     if (this.state !== 'idle') return;
     this.state = 'charging';
     this.meter = 0;
+    this.elapsed = 0;
     this.releaseDue = false;
     const from = this.player.position;
+    const hoop = nearestHoop(hoops, from);
     this.currentStyle = chooseStyle(from, velocity, hoops, defenderPosition);
-    this.reverseSign = reverseCarrySign(from, velocity, nearestHoop(hoops, from));
+    this.currentLeap = leapFor(this.currentStyle, rimDistance(from, hoop), velocity.length());
+    this.reverseSign = reverseCarrySign(from, velocity, hoop);
     this.gatherFromY = THREE.MathUtils.clamp(
       this.ball.position.y - this.player.groundY,
       CD.ball.radius,
@@ -512,9 +560,24 @@ export class ShootingSystem {
   /** Call once per fixed physics step while charging - holds the ball in a rising gather-to-release pose. */
   fixedUpdate(dt: number, hand: 1 | -1, hoops: readonly Hoop[]): void {
     if (this.state !== 'charging') return;
+    this.elapsed += dt;
     this.meter = Math.min(METER_CAP, this.meter + FILL_RATE * dt);
 
-    const windupT = Math.min(1, this.chargeSeconds / this.windupSeconds);
+    // The windup is the arm carrying the ball up, and it does not start
+    // until the gather strides are done: through those the ball is
+    // simply being carried in two hands at chest height, which is what a
+    // gather IS. Without the offset the arm was already halfway to full
+    // extension by the first step.
+    const { strideSeconds } = this.leap;
+    const windupT = THREE.MathUtils.clamp(
+      (this.chargeSeconds - strideSeconds) / Math.max(1e-4, this.windupSeconds - strideSeconds),
+      0,
+      1,
+    );
+    // Drawing the ball in to the body, on the other hand, happens on the
+    // FIRST step - you pick it up out of the dribble and it is in two
+    // hands from there. With no strides this is just the windup again.
+    const gatherT = strideSeconds > 0 ? Math.min(1, this.chargeSeconds / strideSeconds) : windupT;
     const scoopT = Math.min(1, this.meter / SCOOP_METER);
     const setHeight = THREE.MathUtils.lerp(GATHER_HEIGHT_LOW, this.spec.setHeight, windupT);
     // Scoop up out of the dribble first, then ride the windup.
@@ -539,7 +602,7 @@ export class ShootingSystem {
     // thrown across the rim rather than at it.
     const centering = CENTERING[this.currentStyle] ?? GATHER_CENTERING;
     const gatherPos = new THREE.Vector3();
-    this.player.getHandPosition(gatherPos, hand * (1 - centering * windupT), gatherHeight);
+    this.player.getHandPosition(gatherPos, hand * (1 - centering * gatherT), gatherHeight);
     if (isFinish(this.currentStyle)) {
       const hoop = nearestHoop(hoops, gatherPos);
       // Anything put down from above the ring is reached there first
@@ -571,15 +634,35 @@ export class ShootingSystem {
   private finishReleaseDue(ballPos: THREE.Vector3, hoop: Hoop): boolean {
     const apex = shotApexSeconds(this.leap);
     // The one that deliberately goes early - see FLOATER_RELEASE_FRACTION.
-    if (this.currentStyle === 'floater') return this.chargeSeconds >= apex * FLOATER_RELEASE_FRACTION;
+    if (this.currentStyle === 'floater') {
+      return this.chargeSeconds >= shotRiseSeconds(this.leap, FLOATER_RELEASE_FRACTION);
+    }
     if (this.chargeSeconds >= apex) return true;
     if (this.currentStyle !== 'layup') return false;
     // Close in, the shot is a lay-over rather than an arc, and it needs
     // every centimetre of the jump to clear the rim - so it waits for
     // the top even though the distance condition is long since met.
     if (rimDistance(ballPos, hoop) <= LAYUP_DROP_DISTANCE) return false;
-    if (this.chargeSeconds < apex * LAYUP_MIN_RELEASE_FRACTION) return false;
+    if (this.chargeSeconds < shotRiseSeconds(this.leap, LAYUP_MIN_RELEASE_FRACTION)) return false;
     return rimDistance(ballPos, hoop) <= LAYUP_RELEASE_DISTANCE;
+  }
+
+  /**
+   * Abandons a charge that will never be released - the ball was stolen
+   * or otherwise taken out of the shooter's hands mid-gather.
+   *
+   * It has to hand the ball back to physics as well as reset the state.
+   * While charging, the ball is a kinematic body pinned to the gather
+   * anchor every step, so a charge that is simply forgotten leaves it
+   * welded to a player who no longer has it - and any velocity a
+   * defender's poke puts on it is silently discarded, because a
+   * kinematic body does not take one.
+   */
+  cancelCharge(): void {
+    if (this.state !== 'charging') return;
+    this.state = 'idle';
+    this.releaseDue = false;
+    this.ball.release(new THREE.Vector3(), new THREE.Vector3());
   }
 
   /** Releases the shot at the nearest hoop. Returns null if not currently charging. */
@@ -748,6 +831,37 @@ function rimDistance(pos: THREE.Vector3, hoop: Hoop): number {
   return Math.hypot(hoop.rimCenter.x - pos.x, hoop.rimCenter.z - pos.z);
 }
 
+/**
+ * How long a gather gets to be, given the floor left in front of it.
+ *
+ * A layup's two strides are not decoration, they cover ground - about
+ * 2.7m at a walk - and the shot has to let go somewhere the ball can
+ * actually be laid off the glass. Taking the full gather from three
+ * metres out puts the shooter under the basket with the ball still in
+ * their hands. So the count comes from the room: as many whole strides
+ * as fit between here and the release point, capped at the two the
+ * style asks for, and none at all when there is no room for one.
+ *
+ * The travel it has to fit is speed * (strides + the part of the rise
+ * before the release), which is where the constant term comes from.
+ */
+function strideSecondsFor(distance: number, speed: number, leap: ShotLeap): number {
+  if (leap.strideSeconds <= 0 || speed < 0.1) return 0;
+  const riseBeforeRelease = (shotApexSeconds(leap) - leap.strideSeconds) * LAYUP_MIN_RELEASE_FRACTION;
+  const room = (distance - LAYUP_RELEASE_TARGET) / speed - riseBeforeRelease;
+  const steps = Math.floor(room / SHOT_STEP_SECONDS);
+  const capped = Math.min(steps, Math.round(leap.strideSeconds / SHOT_STEP_SECONDS));
+  return Math.max(0, capped) * SHOT_STEP_SECONDS;
+}
+
+/** The leap for one particular attempt: the style's, with its gather cut to the room available. */
+function leapFor(style: ShotStyle, distance: number, speed: number): ShotLeap {
+  const leap = SHOT_STYLE_SPECS[style].leap;
+  if (leap.strideSeconds <= 0) return leap;
+  const strideSeconds = strideSecondsFor(distance, speed, leap);
+  return strideSeconds === leap.strideSeconds ? leap : { ...leap, strideSeconds };
+}
+
 /** The point on the far side of the ring a reverse carries the ball out to before laying it back in. */
 function reverseAnchor(hoop: Hoop, sign: 1 | -1): THREE.Vector3 {
   return new THREE.Vector3(hoop.rimCenter.x, hoop.rimCenter.y, hoop.rimCenter.z + sign * REVERSE_CARRY);
@@ -795,12 +909,16 @@ function chooseStyle(
   const dx = rim.x - from.x;
   const dz = rim.z - from.z;
   const distance = Math.hypot(dx, dz);
-  if (distance > LAYUP_RANGE) return 'jumper';
+  if (distance > LAYUP_DRIVE_RANGE) return 'jumper';
   if (distance < 1e-3) return 'fingerRoll';
 
   // How fast the shooter is actually closing on the rim, not how fast
   // they happen to be moving - running past the basket is not a dunk.
   const closingSpeed = (velocity.x * dx + velocity.y * dz) / distance; // .y stores world Z
+  // Out past the ordinary layup range it is only a finish at all if the
+  // shooter is actually driving at the basket; standing there, it is a
+  // jump shot.
+  if (distance > LAYUP_RANGE && closingSpeed < LAYUP_DRIVE_SPEED) return 'jumper';
   // ...and the part of that travel going ACROSS the rim rather than at
   // it, which is what a baseline drive looks like from here.
   const lateralSpeed = Math.abs((velocity.x * dz - velocity.y * dx) / distance);
@@ -813,6 +931,7 @@ function chooseStyle(
   if (distance <= POWER_RANGE && closingSpeed < POWER_CLOSING_SPEED) return 'power';
   if (
     distance >= FLOATER_MIN_RANGE &&
+    distance <= FLOATER_MAX_RANGE &&
     defenderPosition !== undefined &&
     from.distanceTo(defenderPosition) <= FLOATER_CONTEST_DISTANCE
   ) {

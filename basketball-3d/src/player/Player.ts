@@ -5,7 +5,15 @@ import { PhysicsMaterials } from '@/physics/MaterialProperties';
 import { CollisionGroup, interactionGroups } from '@/physics/CollisionLayers';
 import { CourtDimensions as CD } from '@/basketball/CourtDimensions';
 import { clamp } from '@/utils/MathUtils';
-import { SHOT_STYLE_SPECS, shotLift, shotLandingSeconds, type ShotLeap, type ShotStyle } from './ShotStyles';
+import {
+  SHOT_STYLE_SPECS,
+  shotLift,
+  shotLandingSeconds,
+  shotStrideSteps,
+  shotTakeoffSeconds,
+  type ShotLeap,
+  type ShotStyle,
+} from './ShotStyles';
 
 const GRAVITY = -9.81;
 const GROUNDED_STICK_VELOCITY = -0.6;
@@ -213,8 +221,9 @@ function legStanceDrop(hip: number, knee: number): number {
  * body then floats up out of.
  */
 function shotDipAmount(elapsedSeconds: number, leap: ShotLeap): number {
-  if (elapsedSeconds <= leap.dipSeconds) return elapsedSeconds / leap.dipSeconds;
-  const extendT = (elapsedSeconds - leap.dipSeconds) / SHOT_EXTEND_SECONDS;
+  const sinceStrides = elapsedSeconds - leap.strideSeconds;
+  if (sinceStrides <= leap.dipSeconds) return Math.max(0, sinceStrides) / leap.dipSeconds;
+  const extendT = (sinceStrides - leap.dipSeconds) / SHOT_EXTEND_SECONDS;
   return Math.max(0, 1 - extendT);
 }
 
@@ -325,6 +334,24 @@ const SHOT_EXTEND_SECONDS = 0.12;
  * legs were simply straight, because loadShot unwinds the dip and
  * nothing replaced it until after the ball was gone.
  */
+/**
+ * The gather strides of a layup: the ball comes up out of the dribble
+ * into two hands and the player takes their steps with it before going
+ * up off the inside foot.
+ *
+ * The count is exact, and that is the whole reason this is not just the
+ * walk cycle running a bit harder - the walk phase is wherever the drive
+ * happened to leave it, so a gather built on it would take one and a bit
+ * steps, or three, depending on when the button went down. The first
+ * step is on the finishing-hand side, which puts the takeoff on the
+ * opposite foot, the way a layup is actually taught and the way
+ * poseFinishLimbs already drives the knee.
+ */
+const STRIDE_LEG_AMPLITUDE = 0.75; // radians of hip swing - a gather stride is longer than a walking one
+const STRIDE_KNEE_AMPLITUDE = 1.0; // radians of knee flex on the swinging leg
+const STRIDE_BOB = 0.035; // meters the body rises over each step
+const STRIDE_LEAN = 0.16; // radians of forward lean - you are gathering, not strolling
+
 const FINISH_TUCK_SECONDS = 0.18; // how quickly the legs gather after takeoff
 const FINISH_LEAD_HIP = 1.15; // radians the driving thigh comes up (applied negative = forward)
 const FINISH_LEAD_KNEE = 1.35;
@@ -624,8 +651,12 @@ export class Player {
    * whatever stance that produced) and before/alongside pointArmAtBall,
    * which handles the ball-side arm.
    */
-  loadShot(elapsedSeconds: number, leap: ShotLeap): void {
+  loadShot(elapsedSeconds: number, leap: ShotLeap, hand: 1 | -1 = 1): void {
     const elapsed = Math.max(0, elapsedSeconds);
+    if (elapsed < leap.strideSeconds) {
+      this.poseGatherStrides(elapsed / leap.strideSeconds, shotStrideSteps(leap), hand);
+      return;
+    }
     const dip = shotDipAmount(elapsed, leap);
 
     const priorKnee = this.rig.legs.left.lower.rotation.x;
@@ -643,6 +674,42 @@ export class Player {
       legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) -
       legStanceDrop(hip, knee) +
       shotLift(elapsed, leap);
+  }
+
+  /**
+   * The two gather strides a layup takes with the ball already in hand,
+   * before the plant. `t` runs 0 to 1 across the stride window.
+   *
+   * Driven by its own phase rather than by the walk cycle's, because the
+   * count has to be exact: the walk cycle's phase is wherever the drive
+   * happened to leave it, so a gather built on it would take one and a
+   * bit steps, or three, depending on when the button went down. See
+   * STRIDE_LEG_AMPLITUDE.
+   */
+  private poseGatherStrides(t: number, steps: number, hand: 1 | -1): void {
+    // Half a sine cycle is one step, so the phase spans PI per stride -
+    // a gather that only has room for one still finishes with its feet
+    // together, ready for the plant.
+    const phase = t * Math.PI * steps;
+    // Positive rotation.x swings a limb BACKWARD (see setElbow), so a
+    // positive swing puts the right leg in front - which is the step a
+    // right-handed layup takes first.
+    const swing = hand * Math.sin(phase) * STRIDE_LEG_AMPLITUDE;
+    const leftKnee = Math.max(0, -hand * Math.sin(phase)) * STRIDE_KNEE_AMPLITUDE;
+    const rightKnee = Math.max(0, hand * Math.sin(phase)) * STRIDE_KNEE_AMPLITUDE;
+
+    this.rig.legs.left.upper.rotation.x = swing;
+    this.rig.legs.right.upper.rotation.x = -swing;
+    this.rig.legs.left.lower.rotation.x = leftKnee;
+    this.rig.legs.right.lower.rotation.x = rightKnee;
+
+    this.rig.torsoPivot.rotation.x = Math.max(this.rig.torsoPivot.rotation.x, STRIDE_LEAN);
+    // Undo the walk cycle's stance planting, then ride this one: the
+    // body rises onto each step and settles between them, which is what
+    // makes two strides read as two rather than as a slide.
+    this.visualRoot.position.y +=
+      legStanceDrop(CROUCH_HIP_BEND * this.currentCrouch, CROUCH_KNEE_BEND * this.currentCrouch) +
+      Math.abs(Math.sin(phase * 2)) * STRIDE_BOB;
   }
 
   /**
@@ -695,11 +762,18 @@ export class Player {
     style: ShotStyle,
     ballWorldPos: THREE.Vector3,
   ): void {
-    this.poseFinishLimbs(hand, clamp((elapsedSeconds - leap.dipSeconds) / FINISH_TUCK_SECONDS, 0, 1), style);
+    const amount = clamp((elapsedSeconds - shotTakeoffSeconds(leap)) / FINISH_TUCK_SECONDS, 0, 1);
+    // Nothing yet while the gather strides are running - posing the
+    // airborne limbs at zero would zero the legs out, which is exactly
+    // the stride pose loadShot just set.
+    if (amount > 0) this.poseFinishLimbs(hand, amount, style);
     this.pointArmAtBall(hand, ballWorldPos);
-    // A jump stop is gathered and finished with two hands, so the guide
-    // arm comes up with the ball instead of swinging out to fend off.
-    if (SHOT_STYLE_SPECS[style].twoFooted) this.pointArmAtBall(-hand as 1 | -1, ballWorldPos);
+    // Two hands on the ball through a gather - a jump stop keeps them
+    // there all the way up, a drive finish gives the off hand up the
+    // moment the legs fire and swings it out to fend off instead.
+    if (SHOT_STYLE_SPECS[style].twoFooted || amount <= 0) {
+      this.pointArmAtBall(-hand as 1 | -1, ballWorldPos);
+    }
   }
 
   /**
@@ -724,7 +798,7 @@ export class Player {
     const landing = shotLandingSeconds(leap);
     // 1 at takeoff, 0 at touchdown - drives the leg tuck and the guide
     // hand relaxing out of the follow-through on the way down.
-    const air = clamp((landing - elapsedSeconds) / (landing - leap.dipSeconds), 0, 1);
+    const air = clamp((landing - elapsedSeconds) / (landing - shotTakeoffSeconds(leap)), 0, 1);
 
     if (style === 'jumper') {
       for (const leg of [this.rig.legs.left, this.rig.legs.right]) {

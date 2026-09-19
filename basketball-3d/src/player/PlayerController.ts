@@ -7,7 +7,7 @@ import { PlayerMovement, dampAngle } from './PlayerMovement';
 import { DribbleSystem, DRIBBLE_HEIGHT_HIGH, DRIBBLE_HEIGHT_LOW, DRIBBLE_HEIGHT_NORMAL } from './DribbleSystem';
 import { DribbleMoveSystem, type DribbleMoveType } from './DribbleMoves';
 import { ShootingSystem, nearestHoop, type ShotResult } from './ShootingSystem';
-import { isFinish } from './ShotStyles';
+import { isFinish, shotTakeoffSeconds } from './ShotStyles';
 import { PassingSystem } from './PassingSystem';
 import { PlayerStateMachine, type PlayerState } from './PlayerStateMachine';
 import { BallOwnershipTracker } from '@/basketball/BallOwnership';
@@ -76,12 +76,14 @@ export class PlayerController {
     const charging = this.shooting.state === 'charging';
     // A gather kills the stick, and so does leaving the floor: you do
     // not get to keep accelerating in mid-air. A finish is the one case
-    // that keeps the stick briefly - through the dip, so the drive
-    // carries into the gather rather than stopping dead a stride short
-    // of the basket - and gives it up the moment the legs fire. Without
-    // that cutoff a sprinting dunker kept driving for the whole hang
-    // time and sailed several metres past the rim.
-    const airborne = this.shooting.chargeSeconds >= this.shooting.leap.dipSeconds;
+    // that keeps the stick - through the gather strides and the plant,
+    // so the drive carries into the gather rather than stopping dead a
+    // stride short of the basket - and gives it up the moment the legs
+    // fire. Without that cutoff a sprinting dunker kept driving for the
+    // whole hang time and sailed several metres past the rim. It is also
+    // what lets a layup's two strides actually cover ground rather than
+    // being run on the spot.
+    const airborne = this.shooting.chargeSeconds >= shotTakeoffSeconds(this.shooting.leap);
     const steerable = charging && this.shooting.style !== 'jumper' && !airborne;
     const moveAxis = charging && !steerable ? { x: 0, y: 0 } : this.input.moveAxis;
     const displacement = this.movement.step(moveAxis, sprint, dt);
@@ -259,6 +261,9 @@ export class PlayerController {
    */
   forceLoseBall(): void {
     this.hasBall = false;
+    // A charge in progress owns the ball kinematically, so it has to be
+    // told, or it keeps holding a ball this player no longer has.
+    this.shooting.cancelCharge();
     this.dribbleSprintActive = false;
     this.ballOwnership.claim('free', 'none');
   }

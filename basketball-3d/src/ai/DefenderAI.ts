@@ -155,8 +155,12 @@ export class DefenderAI {
       Math.max(incoming.y, 0.8),
       incoming.z * 0.15 + away.z * 2.0,
     );
-    ball.body.setLinvel(deflected, true);
+    // Possession first, THEN the velocity. A ball being gathered for a
+    // shot is a kinematic body, and a kinematic body silently ignores
+    // setLinvel - so poking one out of a gather did nothing at all until
+    // forceLoseBall had handed it back to physics.
     playerController.forceLoseBall();
+    ball.body.setLinvel(deflected, true);
   }
 
   syncFromPhysics(): void {
